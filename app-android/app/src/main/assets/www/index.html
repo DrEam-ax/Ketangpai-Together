@@ -41,6 +41,22 @@
       </div>
 
       <div class="card">
+        <details id="ipbox">
+          <summary>IP 设置</summary>
+          <div class="stack">
+            <label class="dim small">签到时报给课堂派的 IP（教师端考勤表里能看到这一列）</label>
+            <select id="ipmode">
+              <option value="perAccount">每个账号各自一个固定 IP（推荐）</option>
+              <option value="same">所有账号共用同一个 IP</option>
+              <option value="real">不伪造，用手机真实 IP</option>
+            </select>
+            <div class="dim small" id="iphint"></div>
+            <button id="reroll" class="ghost">重新随机所有 IP</button>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
         <b class="small dim">日志</b>
         <div id="log" class="log"></div>
       </div>

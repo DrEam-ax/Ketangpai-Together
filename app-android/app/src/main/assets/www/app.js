@@ -3,7 +3,7 @@
 const $ = (s) => document.querySelector(s);
 const native = window.Android || null;
 
-const state = { accounts: [], keys: new Set(), scanning: false };
+const state = { accounts: [], keys: new Set(), scanning: false, ipMode: "perAccount", sharedIp: "" };
 
 // ---------------------------------------------------------------- 日志
 
@@ -52,7 +52,7 @@ function loadAccounts() {
       `<input type="checkbox" data-k="${esc(a.key)}" ${on ? "checked" : ""} />` +
       `<span><span class="nm">${esc(a.name || a.key)}</span><br><span class="sub2">${esc(a.key)}${
         a.school ? " · " + esc(a.school) : ""
-      }</span></span>` +
+      }</span><br><span class="ip">IP ${esc(ipLabel(a))}</span></span>` +
       `<button class="x" data-x="${esc(a.key)}">×</button>`;
     box.appendChild(el);
   }
@@ -83,6 +83,36 @@ function loadAccounts() {
 
 function count() {
   $("#count").textContent = `已选 ${state.keys.size} / ${state.accounts.length}`;
+}
+
+// ---------------------------------------------------------------- IP 策略
+
+function ipLabel(a) {
+  if (state.ipMode === "real") return "真实 IP";
+  if (state.ipMode === "same") return state.sharedIp || "(待生成)";
+  return a.ip || "(待生成)";
+}
+
+function loadSettings() {
+  if (!native) return;
+  try {
+    const s = JSON.parse(native.getSettings());
+    state.ipMode = s.mode || "perAccount";
+    state.sharedIp = s.sharedIp || "";
+  } catch {
+    state.ipMode = "perAccount";
+  }
+  const sel = $("#ipmode");
+  if (sel) sel.value = state.ipMode;
+  const hint = $("#iphint");
+  if (hint) {
+    hint.textContent =
+      state.ipMode === "real"
+        ? "不发送 X-Forwarded-For，课堂派会记录你手机真实的出口 IP。"
+        : state.ipMode === "same"
+          ? `所有账号都报同一个 IP：${state.sharedIp}`
+          : "每个账号一个固定假 IP（首次分配后不再变，像各自的住处）。";
+  }
 }
 
 // ---------------------------------------------------------------- 解析票据
@@ -133,7 +163,9 @@ function render(headline, results, note) {
     html +=
       `<div class="res ${r.ok ? "ok" : "bad"}"><span class="t">${r.ok ? "✅" : "❌"}</span>` +
       `<span>${esc(r.label || r.key)}</span>` +
-      `<span class="why">${esc(r.ok ? "签到成功" : r.message || "失败")}</span></div>`;
+      `<span class="why">${esc(r.ok ? "签到成功" : r.message || "失败")}${
+        r.ip ? "<br>IP " + esc(r.ip) : ""
+      }</span></div>`;
   }
   if (note) {
     html += `<div class="res bad"><span class="t">!</span><span class="why">${esc(note)}</span></div>`;
@@ -212,6 +244,20 @@ window.onScanError = function (message) {
 
 $("#scan").addEventListener("click", startScan);
 
+$("#ipmode").addEventListener("change", (e) => {
+  native.setIpMode(e.target.value);
+  loadSettings();
+  loadAccounts();
+  log(`IP 策略已改为「${e.target.selectedOptions[0].textContent}」`, "ok");
+});
+
+$("#reroll").addEventListener("click", () => {
+  native.rerollIps();
+  loadSettings();
+  loadAccounts();
+  log("已重新随机所有账号的 IP", "ok");
+});
+
 $("#all").addEventListener("change", (e) => {
   state.keys.clear();
   if (e.target.checked) for (const a of state.accounts) state.keys.add(a.key);
@@ -249,6 +295,7 @@ $("#add").addEventListener("click", () => {
     log("没有检测到 Android bridge —— 这个页面必须在 App 里打开。", "er");
     return;
   }
+  loadSettings();
   loadAccounts();
   if (state.accounts.length === 0) $("#addbox").open = true;
   log("就绪。点「扫一扫签到」对准二维码即可。");
