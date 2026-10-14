@@ -48,6 +48,21 @@
       android:textSize="17sp"
       android:textStyle="bold" />
 
+    <!-- 远了扫不上时按这个：锁无限远对焦 + 拉到 3 倍（投影屏对比度低，连续对焦会拉风箱） -->
+    <TextView
+      android:id="@+id/farmode"
+      android:layout_width="wrap_content"
+      android:layout_height="40dp"
+      android:layout_marginEnd="8dp"
+      android:gravity="center"
+      android:paddingStart="12dp"
+      android:paddingEnd="12dp"
+      android:background="#33FFFFFF"
+      android:text="远距模式"
+      android:textColor="#FFFFFFFF"
+      android:textSize="13sp"
+      android:contentDescription="远距离模式" />
+
     <!-- 扫不上时按这个：把当前画面存进相册，可以发出来排查 -->
     <TextView
       android:id="@+id/snapshot"

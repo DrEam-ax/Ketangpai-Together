@@ -27,6 +27,7 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.gms.tasks.OnFailureListener;
@@ -133,6 +134,8 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   private static final float ML_TILE_FRAC = 0.55f;
 
   private volatile long lastAutoFocus = 0;
+  /** 远距模式：锁无限远对焦 + 3 倍变焦（应对"教室大屏离得远就扫不上"） */
+  private volatile boolean farMode = false;
   /** ML Kit 分块扫描：-1 表示整幅，0..8 表示 3x3 里的某一块 */
   private int mlTile = -1;
   /** 整幅 / 子块各自一个**长度精确**的缓冲（见 buildNv21Crop 的说明） */
@@ -194,6 +197,14 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
           @Override
           public void onClick(View v) {
             requestSnapshot();
+          }
+        });
+
+    findViewById(R.id.farmode).setOnClickListener(
+        new View.OnClickListener() {
+          @Override
+          public void onClick(View v) {
+            toggleFarMode((TextView) v);
           }
         });
 
@@ -647,7 +658,8 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     // 有些机型不支持连续对焦，那就得定时主动触发一次 ——
     // 老式扫码 App 都是这么干的。不这么做相机就停在初始焦距上不挪窝。
-    if (!continuousFocus && camera != null && now - lastAutoFocus > 1500) {
+    // 远距模式下故意不触发：那个模式就是要锁死焦距。
+    if (!continuousFocus && !farMode && camera != null && now - lastAutoFocus > 1500) {
       lastAutoFocus = now;
       try {
         camera.autoFocus(null);
@@ -943,6 +955,69 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     return null;
   }
 
+  // ------------------------------------------------------------------ 远距模式
+
+  /**
+   * 远距离模式：锁「无限远」对焦 + 拉到 3 倍变焦。
+   *
+   * 为什么需要这个开关：
+   * 教室大屏上的二维码是远距离 + 低对比度的组合。反差式自动对焦在这种画面上
+   * 找不到足够的对比度，会来回拉风箱（hunting）——画面忽虚忽实，
+   * 检测算法再强也没用，表现就是"离远了怎么都扫不上，走近就行"。
+   * 而 2 米以外的景物本来就在无限远附近，直接锁死反而最清楚。
+   *
+   * 近处扫码请关掉它（远距离模式下近处的码会虚）。
+   */
+  private void toggleFarMode(final TextView button) {
+    farMode = !farMode;
+    button.setText(farMode ? "远距模式·开" : "远距模式");
+    button.setBackgroundColor(farMode ? 0xFF07C160 : 0x33FFFFFF);
+
+    if (camHandler != null) {
+      camHandler.post(
+          new Runnable() {
+            @Override
+            public void run() {
+              Camera cam = camera;
+              if (cam == null) return;
+              try {
+                // 有对焦在进行时必须先取消，否则改模式会抛异常
+                cam.cancelAutoFocus();
+              } catch (Exception ignored) {
+              }
+              try {
+                Camera.Parameters p = cam.getParameters();
+                if (farMode) {
+                  List<String> modes = p.getSupportedFocusModes();
+                  if (modes != null && modes.contains(Camera.Parameters.FOCUS_MODE_INFINITY)) {
+                    p.setFocusMode(Camera.Parameters.FOCUS_MODE_INFINITY);
+                  } else if (modes != null
+                      && modes.contains(Camera.Parameters.FOCUS_MODE_FIXED)) {
+                    p.setFocusMode(Camera.Parameters.FOCUS_MODE_FIXED);
+                  }
+                } else if (continuousFocus) {
+                  List<String> modes = p.getSupportedFocusModes();
+                  if (modes != null && modes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+                    p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+                  } else {
+                    p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+                  }
+                } else {
+                  p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+                }
+                cam.setParameters(p);
+              } catch (Exception ignored) {
+              }
+            }
+          });
+    }
+
+    // 顺手拉到 3 倍：远了东西太小，多占点像素总没坏处
+    pinchScale = farMode ? 3f : 1f;
+    applyZoom();
+    toast(farMode ? "远距模式：已锁无限远对焦并放大 3 倍" : "已关闭远距模式");
+  }
+
   // ------------------------------------------------------------------ 存图排查
 
   private void requestSnapshot() {
@@ -952,7 +1027,16 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
     capturedReady = false;
     wantCapture = true;
-    toast("正在抓取当前画面…");
+    toast(
+        "正在抓图 · 预览"
+            + previewWidth
+            + "x"
+            + previewHeight
+            + " · 变焦"
+            + (appliedZoomLevel + 1)
+            + "/"
+            + (maxZoomLevel + 1)
+            + (farMode ? " · 远距模式" : ""));
   }
 
   /**
@@ -1027,7 +1111,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       bmp.recycle();
 
       toast("已保存：" + shownPath);
-      // 把这些数字也记进日志：发图时一起报过来，能直接定位问题
+      // 把这些数字也报出来（toast 里能看到，截图就够了，不用接电脑看 logcat）
       android.util.Log.i(
           "ktp-scan",
           "snapshot "
