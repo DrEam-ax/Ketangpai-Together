@@ -35,6 +35,10 @@ tools/ip-test/out/
 tools/icon/check_*.png
 tools/icon/q_*.png
 
+# Python 缓存
+__pycache__/
+*.pyc
+
 # 系统垃圾
 .DS_Store
 Thumbs.db
