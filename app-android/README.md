@@ -220,12 +220,49 @@ iframe 宽度 = 360   横向溢出 = 0 px   5行总高 = 291 px
    更老的系统用 `SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | LAYOUT_HIDE_NAVIGATION`
    —— 两边都显式声明，行为才一致，也避免在已经自动避让的系统上**重复加内边距**。
 2. 把状态栏/导航栏设为透明，并清掉 `APPEARANCE_LIGHT_*`（深色背景要浅色图标）。
-3. 用 `setOnApplyWindowInsetsListener` 把系统栏的实际高度作为 **padding 加到 WebView** 上。
-4. `web.setBackgroundColor(0xFF0F1116)` —— 否则 padding 那块会露出 WebView 默认的白底。
+3. 把系统栏高度作为 padding 让出来。
+4. 兜底：若某个 ROM 仍上报 0，就直接取系统资源里的 `status_bar_height`。
 
-> 注意：**不要指望 CSS 的 `env(safe-area-inset-top)`**。Android WebView 里那个值反映的是
-> **刘海/挖孔屏的 cutout**，不是状态栏高度 —— 在没刘海的手机上它会是 0，照样被压。
-> 内边距必须在原生侧加。
+### ⚠️ 关键坑：WebView 不认 `setPadding`
 
-> 这一条**没在真机上验证过**（本机没跑模拟器）。装上去如果顶栏还是有重叠，
-> 大概率是某些系统上报的 inset 为 0，那时我改成读 `WindowMetrics` 或直接固定一个状态栏高度兜底。
+这是第一版改了却**依然遮挡**的原因。WebView 的内容由原生 `AwContents` 按 view 的实际边界渲染，
+给它自己 `setPadding` 基本是无效的。
+
+**必须套一层容器，把 padding 加在容器上**：
+
+```java
+FrameLayout root = new FrameLayout(this);
+root.addView(web, new FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT));
+setContentView(root);
+root.setOnApplyWindowInsetsListener(...);   // padding 加在 root 上，不是 web 上
+```
+
+> 也别指望 CSS 的 `env(safe-area-inset-top)`：Android WebView 里那个值反映的是**刘海/挖孔屏的
+> cutout**，不是状态栏高度 —— 没刘海的手机上它是 0，照样被压。内边距必须在原生侧加。
+
+## 十二、App 图标
+
+图标由 `tools/icon/make_icons.py` 从一张成品图生成（脚本留档，可重跑）：
+
+```bash
+python tools/icon/make_icons.py
+```
+
+生成的内容：
+
+| 文件 | 用途 |
+|---|---|
+| `mipmap-anydpi-v26/ic_launcher(.round).xml` | 自适应图标（Android 8+） |
+| `mipmap-*/ic_launcher_foreground.png` | 自适应图标前景（作品缩到 76%） |
+| `mipmap-*/ic_launcher.png` | 传统图标（保留圆角，方角外透明） |
+| `mipmap-*/ic_launcher_round.png` | 传统圆形图标 |
+| `values/colors.xml` | `ic_launcher_background`（取自作品的边缘中位色） |
+
+两个踩过的坑：
+
+1. **`cv2.floodFill` 默认是「和相邻像素比」**，会顺着白→灰→蓝的渐变一路蔓延，
+   把 97% 的像素都判成"外部"。必须加 `FLOODFILL_FIXED_RANGE`（跟种子像素比），
+   这样就只吃掉真正的白底（实测占比 3.7%）。
+2. **前景比例选 76% 不是随便填的**：作品的边缘有一圈亮光，落在画布 12%~88%，
+   而启动器遮罩只显示中间约 17%~83% —— 亮边正好被裁掉，不会出现"方框套方框"；
+   作品里那圈人像在 18%~82%，刚好完整保留。

@@ -16,6 +16,7 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -80,29 +81,32 @@ public class MainActivity extends Activity {
     s.setAllowFileAccess(true);
     s.setLoadWithOverviewMode(true);
     s.setUseWideViewPort(true);
-
-    // 页面背景是深色；WebView 自身也要同色，否则状态栏那块内边距会露出白底
     web.setBackgroundColor(PAGE_BG);
-
     web.setWebViewClient(new WebViewClient());
     web.addJavascriptInterface(new Bridge(), "Android");
     web.loadUrl("file:///android_asset/www/index.html");
-    setContentView(web);
 
-    applyEdgeToEdge();
+    // 必须套一层容器再把系统栏内边距加在容器上：
+    // WebView 的内容由原生 AwContents 按 view 边界渲染，直接 setPadding 到 WebView 上是**无效**的
+    // （这就是上一次改了却还遮挡的原因）。
+    FrameLayout root = new FrameLayout(this);
+    root.setBackgroundColor(PAGE_BG);
+    root.addView(
+        web,
+        new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    setContentView(root);
+
+    applyEdgeToEdge(root);
   }
 
   /**
-   * 处理系统栏。
+   * 处理系统栏遮挡。
    *
-   * 为什么要手动做：targetSdk 35 (Android 15) 起，**边到边显示是强制的** ——
-   * 内容会画到状态栏/导航栏底下。之前顶栏文字被状态栏图标压住就是这个原因。
-   *
-   * 做法：显式声明「铺满整屏」，然后把系统栏的实际高度作为 padding 加到 WebView 上。
-   * 老系统（API < 30）用 SYSTEM_UI_FLAG_LAYOUT_* 达到同样效果，
-   * 这样两边行为一致，也避免在已经自动避让的系统上重复加内边距。
+   * targetSdk 35 (Android 15) 起边到边显示是强制的，内容会画到状态栏底下，
+   * 所以必须自己把系统栏高度作为内边距让出来。
    */
-  private void applyEdgeToEdge() {
+  private void applyEdgeToEdge(final View root) {
     Window window = getWindow();
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -111,7 +115,7 @@ public class MainActivity extends Activity {
       window.setNavigationBarColor(Color.TRANSPARENT);
       WindowInsetsController c = window.getInsetsController();
       if (c != null) {
-        // 深色背景 → 要浅色图标，所以把 LIGHT_*（深色图标）两个标志位清掉
+        // 深色背景 → 要浅色图标，所以把 LIGHT_*（深色图标）标志位清掉
         c.setSystemBarsAppearance(
             0,
             WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
@@ -128,7 +132,7 @@ public class MainActivity extends Activity {
                   | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
     }
 
-    web.setOnApplyWindowInsetsListener(
+    root.setOnApplyWindowInsetsListener(
         new View.OnApplyWindowInsetsListener() {
           @Override
           public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
@@ -150,11 +154,44 @@ public class MainActivity extends Activity {
               right = insets.getSystemWindowInsetRight();
               bottom = insets.getSystemWindowInsetBottom();
             }
+
+            // 兜底：我们上面已经显式要求边到边了，若某些 ROM 仍上报 0，
+            // 就直接取系统资源里的状态栏高度，避免又被压住。
+            if (top <= 0 && isStatusBarShown()) {
+              int resId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+              if (resId > 0) top = getResources().getDimensionPixelSize(resId);
+            }
+            if (bottom <= 0) {
+              int resId =
+                  getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+              if (resId > 0 && hasNavBar()) bottom = getResources().getDimensionPixelSize(resId);
+            }
+
             v.setPadding(left, top, right, bottom);
             return insets;
           }
         });
-    web.requestApplyInsets();
+    root.requestApplyInsets();
+  }
+
+  private boolean isStatusBarShown() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+      if (insets != null) {
+        return insets.isVisible(WindowInsets.Type.statusBars());
+      }
+    }
+    return true;
+  }
+
+  private boolean hasNavBar() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+      if (insets != null) {
+        return insets.isVisible(WindowInsets.Type.navigationBars());
+      }
+    }
+    return false;
   }
 
   @Override
