@@ -10,8 +10,8 @@ android {
     applicationId "com.ktp.scanner"
     minSdk 24
     targetSdk 35
-    versionCode 18
-    versionName "0.3.6"
+    versionCode 19
+    versionName "0.3.7"
 
     // 只留真机在用的 CPU 架构。
     // ML Kit 的 libbarhopper_v3.so 每个架构 3~6MB，x86/x86_64 是模拟器专用的，
@@ -48,7 +48,9 @@ android {
 
 dependencies {
   implementation 'com.google.zxing:core:3.5.3'
-  // ML Kit 的条码检测：用神经网络做检测，小码/糊码比 ZXing 强很多（微信就是这一档）。
-  // 捆绑模型（离线可用），APK 会因此大 3MB 左右。
+  // ML Kit 的条码检测：神经网络检测，作为最后兜底。
+  // 注意：实测它在「屏幕上的高密度二维码」这一场景认不出来（处理 266 帧、零失败、零命中），
+  // 真正解决问题的是下面的 zxing-cpp 原生库。留着它是因为它在别的场景仍然可能有用。
   implementation 'com.google.mlkit:barcode-scanning:17.3.0'
+  // zxing-cpp 原生库（app/src/main/jniLibs/），由 tools/zxing-cpp-build 编出
 }

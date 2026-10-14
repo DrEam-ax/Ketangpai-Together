@@ -141,6 +141,8 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   private volatile int mlRegion = 0;
   /** zxing-cpp 是否可用（原生库加载成功） */
   private boolean cppOk = false;
+  /** 屏幕上是否显示诊断信息（单击切换） */
+  private volatile boolean showDebug = true;
   /** 取亮度平面用的复用缓冲 */
   private byte[] lumBuf;
   /** 整幅 / 子块各自一个**长度精确**的缓冲（见 buildNv21Crop 的说明） */
@@ -234,6 +236,17 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
               public boolean onDoubleTap(MotionEvent e) {
                 pinchScale = 1f;
                 applyZoom();
+                return true;
+              }
+
+              /**
+               * 单击切换诊断信息。
+               * 只在「已确认不是双击」时触发，所以不会和双击复位缩放打架。
+               */
+              @Override
+              public boolean onSingleTapConfirmed(MotionEvent e) {
+                showDebug = !showDebug;
+                updateDebugText();
                 return true;
               }
 
@@ -864,7 +877,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     sb.append(continuousFocus ? "  连续对焦" : "  定时对焦");
     sb.append(cppOk ? "  cpp✓" : "  cpp✗");
 
-    final String text = sb.toString();
+    final String text = showDebug ? sb.toString() : null;
     uiPost(
         new Runnable() {
           @Override
