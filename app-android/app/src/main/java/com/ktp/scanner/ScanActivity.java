@@ -22,12 +22,25 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.mlkit.vision.barcode.BarcodeScanner;
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions;
+import com.google.mlkit.vision.barcode.BarcodeScanning;
+import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.common.InputImage;
+import com.google.zxing.BarcodeFormat;
 import com.google.zxing.BinaryBitmap;
+import com.google.zxing.DecodeHintType;
 import com.google.zxing.LuminanceSource;
 import com.google.zxing.PlanarYUVLuminanceSource;
 import com.google.zxing.common.GlobalHistogramBinarizer;
 import com.google.zxing.common.HybridBinarizer;
 import com.google.zxing.qrcode.QRCodeReader;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
 
 import java.util.List;
 import java.util.Locale;
@@ -60,7 +73,14 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   /** 两次解码之间的最小间隔。解码本身不贵了，这里放小一点，多试几次。 */
   private static final long DECODE_INTERVAL_MS = 60;
   /** 预览长边上限：1280 足够解二维码，再大只是白白拖慢解码。 */
-  private static final int MAX_PREVIEW_WIDTH = 1280;
+  /**
+   * 预览分辨率上限。
+   *
+   * 从 1280 提回 1920 是因为小二维码：像素不够时 ZXing 的定位图案比例判断会失败。
+   * 代价是每帧多解约 2 倍像素，但因为我们只解 crop 区域（不是全画幅），
+   * 单帧解码仍然在几十毫秒量级，靠 DECODE_INTERVAL_MS 限流即可。
+   */
+  private static final int MAX_PREVIEW_WIDTH = 1920;
   private static final float MIN_ZOOM = 1f;
   private static final float MAX_ZOOM = 6f;
 
@@ -97,6 +117,19 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   private volatile boolean finished = false;
   private volatile long lastDecode = 0;
   private volatile int frameCount = 0;
+  /** 2 倍放大用的复用缓冲，避免每帧 new 几百 KB 的数组 */
+  private byte[] upBuf;
+  /**
+   * 放大那一路的目标边长。
+   * 用「固定目标」而不是「固定 2 倍」是为了让成本可控：
+   * 预览分辨率提高后中心正方形本来就大了，再乘 2 会到 300 万像素，解码会卡。
+   */
+  private static final int UPSCALE_TARGET_SIDE = 1280;
+
+  /** ML Kit 兜底检测器（ZXing 认不出来时才用） */
+  private BarcodeScanner mlScanner;
+  private boolean mlInitFailed = false;
+  private volatile boolean mlBusy = false;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -242,6 +275,39 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   protected void onPause() {
     stopCamera();
     super.onPause();
+  }
+
+  /**
+   * 初始化 ML Kit 的条码检测器。
+   *
+   * 这是微信那一档的能力：ML Kit 用神经网络做检测，对小码、糊码、低对比度、
+   * 角度刁钻的码都明显强于 ZXing 那种"找 1:1:3:1:1 定位图案"的经典算法。
+   *
+   * 拿来兜底而不是替换：ZXing 先试（快、够用），它失败了才交给 ML Kit。
+   * 这样万一某些机型上 ML Kit 起不来，扫码功能也不会坏。
+   */
+  private void initMlKit() {
+    if (mlScanner != null || mlInitFailed) return;
+    try {
+      BarcodeScannerOptions options =
+          new BarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build();
+      mlScanner = BarcodeScanning.getClient(options);
+    } catch (Throwable t) {
+      mlInitFailed = true;
+      mlScanner = null;
+    }
+  }
+
+  @Override
+  protected void onDestroy() {
+    if (mlScanner != null) {
+      try {
+        mlScanner.close();
+      } catch (Throwable ignored) {
+      }
+      mlScanner = null;
+    }
+    super.onDestroy();
   }
 
   @Override
@@ -526,11 +592,72 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       previewHeight = h;
     }
 
-    // 只解 Hybrid；每隔几帧再补一次 GlobalHistogram（它更慢，但能救低对比度的图）
-    boolean secondPass = frameCount % 3 == 0;
-    String text = decode(data, w, h, secondPass);
+    // 每帧先按原尺寸快速解（正常大小的二维码靠这条）；
+    // 每 4 帧再走一次「中心正方形 2 倍放大 + TRY_HARDER」——这是小二维码的救命路径。
+    boolean extra = frameCount % 4 == 0;
+    String text = decode(data, w, h, extra);
+    if (text == null && extra) {
+      text = decodeUpscaled(data, w, h);
+    }
     if (text != null && !text.isEmpty()) {
       succeed(text);
+      return;
+    }
+
+    // ZXing 都没认出来，交给 ML Kit（异步，不阻塞取景）。
+    // 隔帧跑一次即可，它比 ZXing 重。
+    if (frameCount % 2 == 0) {
+      runMlKit(data, w, h);
+    }
+  }
+
+  /**
+   * 用 ML Kit 再试一次。异步执行，结果回到主线程。
+   *
+   * 用 mlBusy 防止任务堆积：ML Kit 一次处理要几十到上百毫秒，
+   * 不等它做完就继续投喂只会把队列塞满、越扫越卡。
+   */
+  private void runMlKit(byte[] data, int width, int height) {
+    initMlKit();
+    if (mlScanner == null || mlBusy || finished) return;
+
+    final InputImage image;
+    try {
+      image =
+          InputImage.fromByteArray(
+              data, width, height, displayRotation, InputImage.IMAGE_FORMAT_NV21);
+    } catch (Throwable t) {
+      return;
+    }
+
+    mlBusy = true;
+    try {
+      mlScanner
+          .process(image)
+          .addOnSuccessListener(
+              new OnSuccessListener<List<Barcode>>() {
+                @Override
+                public void onSuccess(List<Barcode> barcodes) {
+                  mlBusy = false;
+                  if (finished) return;
+                  for (Barcode b : barcodes) {
+                    String value = b.getRawValue();
+                    if (value != null && !value.isEmpty()) {
+                      succeed(value);
+                      return;
+                    }
+                  }
+                }
+              })
+          .addOnFailureListener(
+              new OnFailureListener() {
+                @Override
+                public void onFailure(Exception e) {
+                  mlBusy = false;
+                }
+              });
+    } catch (Throwable t) {
+      mlBusy = false;
     }
   }
 
@@ -538,7 +665,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
    * 解一帧。只解 crop 区域（屏幕实际看得见的那部分），并且只认 QR 格式 ——
    * 这两点是识别速度的关键：像素少了、也不再逐个试其他条码格式。
    */
-  private String decode(byte[] data, int width, int height, boolean secondPass) {
+  private String decode(byte[] data, int width, int height, boolean altBinarizer) {
     int left = cropLeft;
     int top = cropTop;
     int w = cropWidth;
@@ -551,15 +678,77 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     LuminanceSource source = new PlanarYUVLuminanceSource(data, width, height, left, top, w, h, false);
+    return runDecode(source, false, altBinarizer);
+  }
+
+  /**
+   * 把小二维码救回来的那一路：取 crop 的中心正方形，2 倍最近邻放大后再解，并开 TRY_HARDER。
+   *
+   * 为什么要放大（而不是直接解原图）：
+   * ZXing 靠扫描"黑:白:黑:白:黑 = 1:1:3:1:1"来找定位图案。二维码在画面里很小时，
+   * 每个模块可能只占 1~2 个像素，这个比例判断就崩了 —— 表现就是"怎么举都扫不上"。
+   * 放大后每个模块占的像素变多，比例判断才站得住。微信的多尺度检测本质也在做这件事。
+   *
+   * TRY_HARDER 让 ZXing 逐行扫描（默认是每 3 行扫一次），小码更容易被找到。
+   *
+   * 只取中心正方形 + 限制放大后的总像素，是为了不让这一路把帧率拖垮。
+   */
+  private String decodeUpscaled(byte[] data, int width, int height) {
+    int left = cropLeft;
+    int top = cropTop;
+    int w = cropWidth;
+    int h = cropHeight;
+    if (w <= 0 || h <= 0 || left + w > width || top + h > height) {
+      left = 0;
+      top = 0;
+      w = width;
+      h = height;
+    }
+
+    int side = Math.min(w, h);
+    int outSide = Math.min(side * 2, UPSCALE_TARGET_SIDE);
+    if (outSide < side * 1.15f) return null; // 码已经够大了，用不着这一路
+    int lx = left + (w - side) / 2;
+    int ly = top + (h - side) / 2;
+
+    int outW = outSide;
+    int outH = outSide;
+    if (upBuf == null || upBuf.length < outW * outH) upBuf = new byte[outW * outH];
+    byte[] dst = upBuf;
+    for (int y = 0; y < outH; y++) {
+      int srcRow = (ly + (y * side) / outSide) * width + lx;
+      int dstRow = y * outW;
+      for (int x = 0; x < outW; x++) {
+        dst[dstRow + x] = data[srcRow + (x * side) / outSide];
+      }
+    }
+
+    LuminanceSource source = new PlanarYUVLuminanceSource(dst, outW, outH, 0, 0, outW, outH, false);
+    return runDecode(source, true, true);
+  }
+
+  /** 统一的解码入口：先 HybridBinarizer，必要时换 GlobalHistogramBinarizer 再试一次。 */
+  private String runDecode(LuminanceSource source, boolean tryHarder, boolean altBinarizer) {
+    Map<DecodeHintType, Object> hints = null;
+    if (tryHarder) {
+      hints = new EnumMap<>(DecodeHintType.class);
+      hints.put(DecodeHintType.POSSIBLE_FORMATS, Collections.singletonList(BarcodeFormat.QR_CODE));
+      hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);
+    }
+
     QRCodeReader reader = new QRCodeReader();
     try {
-      return reader.decode(new BinaryBitmap(new HybridBinarizer(source))).getText();
+      BinaryBitmap hybrid = new BinaryBitmap(new HybridBinarizer(source));
+      return hints == null ? reader.decode(hybrid).getText() : reader.decode(hybrid, hints).getText();
     } catch (Exception ignored) {
       // 换一种二值化再试
     }
-    if (secondPass) {
+    if (altBinarizer) {
       try {
-        return reader.decode(new BinaryBitmap(new GlobalHistogramBinarizer(source))).getText();
+        BinaryBitmap global = new BinaryBitmap(new GlobalHistogramBinarizer(source));
+        return hints == null
+            ? reader.decode(global).getText()
+            : reader.decode(global, hints).getText();
       } catch (Exception ignored) {
       }
     }

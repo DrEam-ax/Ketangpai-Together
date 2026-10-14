@@ -10,8 +10,15 @@ android {
     applicationId "com.ktp.scanner"
     minSdk 24
     targetSdk 35
-    versionCode 11
-    versionName "0.2.9"
+    versionCode 12
+    versionName "0.3.0"
+
+    // 只留真机在用的 CPU 架构。
+    // ML Kit 的 libbarhopper_v3.so 每个架构 3~6MB，x86/x86_64 是模拟器专用的，
+    // 打进包里纯属浪费 —— 实测白占 12MB（25.8MB -> 13.7MB）。
+    ndk {
+      abiFilters 'arm64-v8a', 'armeabi-v7a'
+    }
   }
 
   buildTypes {
@@ -19,7 +26,11 @@ android {
       minifyEnabled false
     }
     release {
-      minifyEnabled false
+      // 开混淆 + 裁剪：ML Kit 的 Java 层让 classes.dex 有 9MB，
+      // 走一次 R8 能砍掉相当一部分（库自带 consumer rules，不用手写 keep）。
+      minifyEnabled true
+      shrinkResources true
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
       // 用 debug 签名，方便直接装真机测试
       signingConfig signingConfigs.debug
     }
@@ -37,4 +48,7 @@ android {
 
 dependencies {
   implementation 'com.google.zxing:core:3.5.3'
+  // ML Kit 的条码检测：用神经网络做检测，小码/糊码比 ZXing 强很多（微信就是这一档）。
+  // 捆绑模型（离线可用），APK 会因此大 3MB 左右。
+  implementation 'com.google.mlkit:barcode-scanning:17.3.0'
 }
