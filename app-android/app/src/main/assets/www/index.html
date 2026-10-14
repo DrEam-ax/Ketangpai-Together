@@ -13,20 +13,23 @@
     </header>
 
     <main>
+      <!-- ===== 要签的人 ===== -->
       <div class="card">
-        <div class="row">
-          <b>要签的人</b>
-          <label class="dim small"><input type="checkbox" id="all" checked /> 全选</label>
-          <span class="dim small" id="count"></span>
+        <div class="head">
+          <span class="ttl">要签的人</span>
+          <span class="count" id="count">已选 0 / 0</span>
+          <label class="chk"><input type="checkbox" id="all" checked />全选</label>
         </div>
+
         <div id="accounts" class="accounts"></div>
 
         <button class="big" id="scan">扫一扫签到</button>
-        <p class="dim small center">对准大屏上的二维码，识别到会自动签到</p>
+        <p class="tip">对准大屏上的二维码，识别到会自动签到</p>
 
         <div id="result"></div>
       </div>
 
+      <!-- ===== 添加账号 ===== -->
       <div class="card">
         <details id="addbox">
           <summary>添加账号</summary>
@@ -36,15 +39,16 @@
             <input id="p" type="password" placeholder="密码" />
             <button id="add">添加并验证登录</button>
           </div>
-          <p class="dim small" id="addhint">会先真实登录一次，成功才保存到本机。</p>
+          <p class="tip" id="addhint">会先真实登录一次，成功才保存到本机。</p>
         </details>
       </div>
 
+      <!-- ===== IP 设置 ===== -->
       <div class="card">
         <details id="ipbox">
           <summary>IP 设置</summary>
           <div class="stack">
-            <label class="dim small">签到时报给课堂派的 IP（教师端考勤表里能看到这一列）</label>
+            <div class="dim small">签到时报给课堂派的 IP（教师端考勤表里有这一列）</div>
             <select id="ipmode">
               <option value="perAccount">每个账号各自一个固定 IP（推荐）</option>
               <option value="same">所有账号共用同一个 IP</option>
@@ -56,8 +60,11 @@
         </details>
       </div>
 
+      <!-- ===== 日志 ===== -->
       <div class="card">
-        <b class="small dim">日志</b>
+        <div class="head">
+          <span class="ttl">日志</span>
+        </div>
         <div id="log" class="log"></div>
       </div>
     </main>

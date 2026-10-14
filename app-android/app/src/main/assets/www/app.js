@@ -3,7 +3,14 @@
 const $ = (s) => document.querySelector(s);
 const native = window.Android || null;
 
-const state = { accounts: [], keys: new Set(), scanning: false, ipMode: "perAccount", sharedIp: "" };
+const state = {
+  accounts: [],
+  keys: new Set(),
+  selectionReady: false,
+  scanning: false,
+  ipMode: "perAccount",
+  sharedIp: "",
+};
 
 // ---------------------------------------------------------------- 日志
 
@@ -36,13 +43,19 @@ function loadAccounts() {
   }
   state.accounts = list;
 
-  if (state.keys.size === 0) for (const a of list) state.keys.add(a.key);
+  // 只有「首次加载」才默认全选。
+  // 之前写成 `if (state.keys.size === 0) 全选`，导致取消全选后集合一空就被立刻勾回来 —— 全选框形同失效。
+  if (!state.selectionReady) {
+    for (const a of list) state.keys.add(a.key);
+    state.selectionReady = true;
+  }
+  // 剪掉已经被删掉的账号
   for (const k of [...state.keys]) if (!list.some((a) => a.key === k)) state.keys.delete(k);
 
   const box = $("#accounts");
   box.innerHTML = "";
   if (list.length === 0) {
-    box.innerHTML = `<div class="dim small">还没有账号 —— 展开下面「添加账号」加一个。</div>`;
+    box.innerHTML = `<div class="empty">还没有账号 —— 展开下面「添加账号」加一个。</div>`;
   }
   for (const a of list) {
     const on = state.keys.has(a.key);
@@ -50,10 +63,12 @@ function loadAccounts() {
     el.className = "acc" + (on ? " checked" : "");
     el.innerHTML =
       `<input type="checkbox" data-k="${esc(a.key)}" ${on ? "checked" : ""} />` +
-      `<span><span class="nm">${esc(a.name || a.key)}</span><br><span class="sub2">${esc(a.key)}${
-        a.school ? " · " + esc(a.school) : ""
-      }</span><br><span class="ip">IP ${esc(ipLabel(a))}</span></span>` +
-      `<button class="x" data-x="${esc(a.key)}">×</button>`;
+      `<span class="who">` +
+      `<span class="nm">${esc(a.name || a.key)}</span>` +
+      `<span class="sub2">${esc(a.key)}${a.school ? " · " + esc(a.school) : ""}</span>` +
+      `</span>` +
+      `<span class="ip">${esc(ipLabel(a))}</span>` +
+      `<button class="x" data-x="${esc(a.key)}" title="删除">×</button>`;
     box.appendChild(el);
   }
 
@@ -62,7 +77,7 @@ function loadAccounts() {
       if (cb.checked) state.keys.add(cb.dataset.k);
       else state.keys.delete(cb.dataset.k);
       cb.closest(".acc").classList.toggle("checked", cb.checked);
-      $("#all").checked = state.keys.size === state.accounts.length;
+      syncAllBox();
       count();
     }),
   );
@@ -78,6 +93,30 @@ function loadAccounts() {
       log(`已删除账号 ${k}`, "wa");
     }),
   );
+  syncAllBox();
+  count();
+}
+
+/** 全选框跟随实际选择状态（全选 / 半选 / 未选）。 */
+function syncAllBox() {
+  const all = $("#all");
+  if (!all) return;
+  const total = state.accounts.length;
+  const picked = state.keys.size;
+  all.checked = total > 0 && picked === total;
+  all.indeterminate = picked > 0 && picked < total;
+}
+
+function setAll(checked) {
+  state.selectionReady = true;
+  state.keys.clear();
+  if (checked) for (const a of state.accounts) state.keys.add(a.key);
+  for (const cb of document.querySelectorAll("#accounts input[type=checkbox]")) {
+    cb.checked = checked;
+    const card = cb.closest(".acc");
+    if (card) card.classList.toggle("checked", checked);
+  }
+  syncAllBox();
   count();
 }
 
@@ -259,9 +298,7 @@ $("#reroll").addEventListener("click", () => {
 });
 
 $("#all").addEventListener("change", (e) => {
-  state.keys.clear();
-  if (e.target.checked) for (const a of state.accounts) state.keys.add(a.key);
-  loadAccounts();
+  setAll(e.target.checked);
 });
 
 $("#add").addEventListener("click", () => {

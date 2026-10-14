@@ -168,5 +168,43 @@ app-android/
 安全上下文判定各版本不一），而且拿到的帧还要绕回 JS 再解码。
 
 现在改成原生：相机开在一个带 Looper 的 `HandlerThread` 上，`onPreviewFrame` 就地用 ZXing
-解 NV21 的 Y 平面（每 180ms 最多解一帧，不会卡 UI，也不会烧 CPU）。
+解 NV21 的 Y 平面（每 60ms 最多解一帧，不会卡 UI，也不会烧 CPU）。
 二维码即使旋转 90° 也能识别 —— ZXing 的定位图案本来就是旋转不变的。
+
+## 十、开发时怎么验证（不用装机）
+
+改 UI 或 IP 逻辑时，有两条**不需要手机、不需要模拟器**的验证路径 —— 都用上了才发版：
+
+### 1. IP 逻辑单测（纯 Java）
+
+```bash
+javac -encoding UTF-8 -d /tmp/ipout \
+  app-android/app/src/main/java/com/ktp/scanner/IpUtil.java \
+  tools/ip-test/IpUtilTest.java
+java -cp /tmp/ipout IpUtilTest
+```
+
+### 2. 界面布局实测（无头 Chrome）
+
+`tools/ui-preview/` 会用假数据渲染真实界面，然后**量出真实几何**（行高、是否溢出、
+IP 列是否对齐），避免"看着差不多就发版"：
+
+```bash
+node tools/ui-preview/diag-server.mjs          # 一个终端：起接收诊断的小服务
+node tools/ui-preview/build.mjs                # 另一个终端：生成预览页
+chrome --headless=new --disable-gpu --allow-file-access-from-files \
+  --force-device-scale-factor=1 --window-size=400,900 --virtual-time-budget=3000 \
+  --screenshot=tools/ui-preview/shot-360.png \
+  file:///<repo>/tools/ui-preview/www/frame.html
+```
+
+`frame.html` 把宽度**锁死在 360px**（Chrome 的 `--window-size` 在某些机器上不生效），
+这样验的就是最窄手机。结果写进 `tools/ui-preview/diag.log`，例如：
+
+```
+iframe 宽度 = 360   横向溢出 = 0 px   5行总高 = 291 px
+每行 h=52  nm=120/174 截断=True 换行=1  ipLeft=204 ipRight=282
+```
+
+（这套工具是被真实 bug 逼出来的：账号卡片曾经因为文字换行被撑到 100+ px，
+4 个人就占满一屏 —— 那次如果先量一下就不会发出去。）

@@ -25,6 +25,12 @@ app-android/*.jks
 app-android/screen*.png
 app-android/step*.png
 
+# UI 布局预览的生成物（脚本保留，产物忽略）
+tools/ui-preview/www/
+tools/ui-preview/diag.log
+tools/ui-preview/shot-*.png
+tools/ip-test/out/
+
 # 系统垃圾
 .DS_Store
 Thumbs.db
