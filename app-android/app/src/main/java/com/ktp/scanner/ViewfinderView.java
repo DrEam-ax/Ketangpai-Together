@@ -27,6 +27,7 @@ public class ViewfinderView extends View {
   private final Paint cornerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
   private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
   private final Paint hintPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+  private final Paint hintPaint2 = new Paint(Paint.ANTI_ALIAS_FLAG);
 
   private final RectF frame = new RectF();
   private float density = 1f;
@@ -51,6 +52,9 @@ public class ViewfinderView extends View {
     hintPaint.setColor(COLOR_HINT);
     hintPaint.setTextSize(14f * density);
     hintPaint.setTextAlign(Paint.Align.CENTER);
+    hintPaint2.setColor(0xFF9AA0A6);
+    hintPaint2.setTextSize(12f * density);
+    hintPaint2.setTextAlign(Paint.Align.CENTER);
   }
 
   @Override
@@ -113,8 +117,11 @@ public class ViewfinderView extends View {
     }
 
     // 提示文字
-    String hint = found ? "识别成功" : "将二维码放入框内，即可自动识别";
+    String hint = found ? "识别成功" : "对准二维码，自动识别";
     canvas.drawText(hint, w / 2f, frame.bottom + 34 * density, hintPaint);
+    if (!found) {
+      canvas.drawText("太远就双指放大", w / 2f, frame.bottom + 56 * density, hintPaint2);
+    }
 
     // 缩放倍率（双指捏合时出现）
     if (zoomLabel != null && !found) {

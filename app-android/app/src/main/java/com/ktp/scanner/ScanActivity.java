@@ -24,11 +24,10 @@ import android.widget.FrameLayout;
 
 import com.google.zxing.BinaryBitmap;
 import com.google.zxing.LuminanceSource;
-import com.google.zxing.MultiFormatReader;
 import com.google.zxing.PlanarYUVLuminanceSource;
-import com.google.zxing.Result;
 import com.google.zxing.common.GlobalHistogramBinarizer;
 import com.google.zxing.common.HybridBinarizer;
+import com.google.zxing.qrcode.QRCodeReader;
 
 import java.util.List;
 import java.util.Locale;
@@ -36,19 +35,21 @@ import java.util.Locale;
 /**
  * 全屏实时扫码（微信扫一扫那种）。
  *
- * 为什么用原生相机而不是 WebView 的 getUserMedia：
- *   getUserMedia 在 file:// 页面 + WebView 里行为不稳定，还要额外处理
- *   onPermissionRequest；原生 Camera 直接、可控、延迟低。
+ * 相机开在一个带 Looper 的后台线程上，onPreviewFrame 就在这个线程里跑，
+ * 所以解码是就地做的 —— 解码期间收不到新帧，因此**每帧解码速度 = 识别快慢**。
  *
- * 相机开在一个带 Looper 的后台线程上，所以 onPreviewFrame 回调也在这个线程，
- * 可以就地解码而不会卡 UI。每隔一小段时间才解一帧，避免浪费 CPU。
+ * ── 为什么以前"举半天才识别"（实测踩过的坑）──────────────────────────
+ *  1) 预览尺寸挑反了：拿竖屏比例 (1080/2400=0.45) 去比相机横向比例
+ *     (1280/720=1.78)，结果挑成最不匹配的 4:3，分辨率可能到 1920x1440（276 万像素）。
+ *     正确做法是比较「旋转之后」的比例 h/w 和屏幕比例。
+ *  2) 每帧解码整幅 276 万像素，而且 MultiFormatReader 会把所有条码格式都试一遍，
+ *     单帧要几百毫秒 —— 相机回调被堵住，实际每秒只识别 1~2 次。
+ *  现在：预览封顶 1280、只解屏幕真正看得到的那块区域、只认 QR 格式、
+ *  并且把尝试间隔压到 60ms，识别速度提升一个数量级。
  *
- * 两个踩过的坑：
- *  1) 画面拉伸：相机预览是横向的（如 1280x960），旋转 90° 后在屏幕上是 960x1280
- *     （比例 0.75）。SurfaceView 若用 match_parent，在 1080x2400 上比例是 0.45，
- *     纵向会被拉 1.875 倍。所以这里按真实比例等比放大铺满 + 居中裁剪。
- *  2) 双指缩放：优先用相机自己的变焦（真裁传感器，细节更多，和微信一致）；
- *     设备不支持变焦时，退化成缩放 SurfaceView。
+ * ── 另外两个坑 ───────────────────────────────────────────────────────
+ *  3) 画面拉伸：按真实比例等比放大铺满 + 居中裁剪，不能直接用 match_parent。
+ *  4) 双指缩放：优先用相机变焦（真裁传感器），不支持时退化成缩放 SurfaceView。
  */
 public class ScanActivity extends Activity implements SurfaceHolder.Callback, Camera.PreviewCallback {
 
@@ -56,9 +57,10 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   public static final String EXTRA_ERROR = "error";
 
   private static final int REQ_CAM = 2001;
-  private static final long DECODE_INTERVAL_MS = 180;
-  /** 预览尺寸上限：够解码二维码，又不至于每帧太重。 */
-  private static final int MAX_PREVIEW_WIDTH = 1920;
+  /** 两次解码之间的最小间隔。解码本身不贵了，这里放小一点，多试几次。 */
+  private static final long DECODE_INTERVAL_MS = 60;
+  /** 预览长边上限：1280 足够解二维码，再大只是白白拖慢解码。 */
+  private static final int MAX_PREVIEW_WIDTH = 1280;
   private static final float MIN_ZOOM = 1f;
   private static final float MAX_ZOOM = 6f;
 
@@ -74,13 +76,18 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   /** 显示方向（0/90/180/270），用来算预览在屏幕上的真实宽高比。 */
   private int displayRotation = 90;
 
+  /** 屏幕实际能看到的预览区域（未旋转的 buffer 坐标系）。只解这块，快得多。 */
+  private int cropLeft = 0;
+  private int cropTop = 0;
+  private int cropWidth = 0;
+  private int cropHeight = 0;
+
   // 变焦相关
   private boolean zoomSupported = false;
   private List<Integer> zoomRatios;
   private int maxZoomLevel = 0;
   private int appliedZoomLevel = -1;
   private float pinchScale = 1f;
-  /** 等比铺满后的基准尺寸（1x 时），缩放 SurfaceView 时按它乘。 */
   private int baseSurfaceW = 0;
   private int baseSurfaceH = 0;
 
@@ -164,7 +171,6 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     return super.dispatchTouchEvent(ev);
   }
 
-  /** 把捏合倍率应用到画面上。 */
   private void applyZoom() {
     if (finished) return;
 
@@ -204,7 +210,6 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
             });
       }
     } else {
-      // 设备不支持变焦：退化成缩放 SurfaceView（数字变焦，至少手感一致）
       final float scale = pinchScale;
       runOnUiThread(
           new Runnable() {
@@ -246,7 +251,6 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
 
   @Override
   public void surfaceChanged(SurfaceHolder h, int format, int width, int height) {
-    // 尺寸变化（旋转/分辨率切换）后重启预览
     if (camera == null) return;
     try {
       camera.stopPreview();
@@ -294,17 +298,13 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       Camera.Parameters p = camera.getParameters();
 
       Point screen = screenSize();
-      // 预览是横向的，要拿它和「屏幕横过来的比例」比，才知道旋转后裁掉多少
-      double screenRatio = (double) screen.x / (double) screen.y;
-
-      Camera.Size best = choosePreviewSize(p.getSupportedPreviewSizes(), screenRatio);
+      Camera.Size best = choosePreviewSize(p.getSupportedPreviewSizes(), screen);
       if (best != null) {
         previewWidth = best.width;
         previewHeight = best.height;
         p.setPreviewSize(previewWidth, previewHeight);
       }
 
-      // 变焦能力
       try {
         if (p.isZoomSupported()) {
           maxZoomLevel = p.getMaxZoom();
@@ -334,36 +334,53 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       camera.setPreviewCallback(this);
       camera.startPreview();
 
-      layoutSurface(screen);
+      computeLayout(screen);
     } catch (Exception e) {
       fail("相机初始化失败：" + e.getMessage());
     }
   }
 
   /**
-   * 按真实比例给 SurfaceView 定尺寸：等比放大到刚好盖住整屏，然后居中。
-   * 这样画面不会被拉扁/拉长，多出来的部分被父容器裁掉。
+   * 一次算清两件事：
+   *   1) SurfaceView 该多大（等比铺满屏幕，居中，多出来的裁掉）—— 这样画面不变形
+   *   2) 屏幕实际能看到预览的哪一块 —— 解码只解这块，省掉大部分像素
    */
-  private void layoutSurface(final Point screen) {
+  private void computeLayout(final Point screen) {
     if (previewWidth <= 0 || previewHeight <= 0) return;
+
     final boolean swapped = displayRotation % 180 != 0;
-    final int displayW = swapped ? previewHeight : previewWidth;
-    final int displayH = swapped ? previewWidth : previewHeight;
+    final int displayW = swapped ? previewHeight : previewWidth; // 屏幕上的宽
+    final int displayH = swapped ? previewWidth : previewHeight; // 屏幕上的高
+
+    float scale = Math.max((float) screen.x / displayW, (float) screen.y / displayH);
+
+    // 可见的显示区域
+    int visibleW = Math.min(displayW, Math.round(screen.x / scale));
+    int visibleH = Math.min(displayH, Math.round(screen.y / scale));
+
+    // 映射回未旋转的 buffer 坐标
+    int bufW = swapped ? visibleH : visibleW;
+    int bufH = swapped ? visibleW : visibleH;
+    bufW = Math.min(bufW, previewWidth);
+    bufH = Math.min(bufH, previewHeight);
+    cropWidth = bufW;
+    cropHeight = bufH;
+    cropLeft = Math.max(0, (previewWidth - bufW) / 2);
+    cropTop = Math.max(0, (previewHeight - bufH) / 2);
+
+    baseSurfaceW = Math.round(displayW * scale);
+    baseSurfaceH = Math.round(displayH * scale);
 
     runOnUiThread(
         new Runnable() {
           @Override
           public void run() {
             if (finished || surface == null) return;
-            float scale = Math.max((float) screen.x / displayW, (float) screen.y / displayH);
-            baseSurfaceW = Math.round(displayW * scale);
-            baseSurfaceH = Math.round(displayH * scale);
             applySurfaceSize(pinchScale);
           }
         });
   }
 
-  /** 按倍率设置 SurfaceView 尺寸（仅在不支持相机变焦时使用）。 */
   private void applySurfaceSize(float scale) {
     if (surface == null || baseSurfaceW <= 0 || baseSurfaceH <= 0) return;
     FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) surface.getLayoutParams();
@@ -373,7 +390,6 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     surface.setLayoutParams(lp);
   }
 
-  /** 屏幕可用像素（含状态栏/导航栏，因为我们全屏）。 */
   @SuppressWarnings("deprecation")
   private Point screenSize() {
     Point p = new Point();
@@ -386,7 +402,6 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     return p;
   }
 
-  /** 标准算法：用相机朝向 + 当前屏幕旋转算出预览该转多少度。 */
   private int calcDisplayRotation() {
     try {
       Camera.CameraInfo info = new Camera.CameraInfo();
@@ -419,24 +434,26 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   }
 
   /**
-   * 挑预览尺寸：
-   *   1) 先找比例和屏幕最接近的（这样旋转后裁掉的最少）
-   *   2) 同比例里挑面积最大的（分辨率高，二维码更好认）
-   *   3) 实在没有合适的，就挑不超过上限里最大的
+   * 挑预览尺寸。
+   *
+   * 关键：预览缓冲区是**横向**的，经 setDisplayOrientation 旋转 90° 后，
+   * 缓冲区的高变成屏幕的宽、缓冲区的宽变成屏幕的高。所以要拿
+   * 「(height/width)」去和「屏幕宽/屏幕高」比，而不是拿 width/height 比 ——
+   * 之前就是这里比反了，才挑成又大又不匹配的 4:3。
    */
-  private static Camera.Size choosePreviewSize(List<Camera.Size> sizes, double screenRatio) {
+  private static Camera.Size choosePreviewSize(List<Camera.Size> sizes, Point screen) {
     if (sizes == null || sizes.isEmpty()) return null;
 
+    double screenRatio = (double) screen.x / (double) screen.y; // 例如 1080/2400 = 0.45
     Camera.Size best = null;
     double bestDiff = Double.MAX_VALUE;
     long bestArea = 0;
 
     for (Camera.Size s : sizes) {
       if (s.width > MAX_PREVIEW_WIDTH) continue;
-      double ratio = (double) s.width / (double) s.height;
-      double diff = Math.abs(ratio - screenRatio);
+      double rotatedRatio = (double) s.height / (double) s.width; // 16:9 -> 0.5625
+      double diff = Math.abs(rotatedRatio - screenRatio);
       long area = (long) s.width * s.height;
-      // 比例差距小于 0.02 视为同一档，此时比面积
       if (diff < bestDiff - 0.02 || (Math.abs(diff - bestDiff) <= 0.02 && area > bestArea)) {
         bestDiff = Math.min(bestDiff, diff);
         bestArea = area;
@@ -509,28 +526,42 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       previewHeight = h;
     }
 
-    String text = decode(data, w, h);
+    // 只解 Hybrid；每隔几帧再补一次 GlobalHistogram（它更慢，但能救低对比度的图）
+    boolean secondPass = frameCount % 3 == 0;
+    String text = decode(data, w, h, secondPass);
     if (text != null && !text.isEmpty()) {
       succeed(text);
     }
   }
 
-  /** 拿 NV21 的 Y 平面直接给 ZXing。二维码旋转 90° 也能识别（定位图案是旋转不变的）。 */
-  private static String decode(byte[] data, int width, int height) {
-    LuminanceSource source = new PlanarYUVLuminanceSource(data, width, height, 0, 0, width, height, false);
-    MultiFormatReader reader = new MultiFormatReader();
-    try {
-      Result r = reader.decodeWithState(new BinaryBitmap(new HybridBinarizer(source)));
-      return r.getText();
-    } catch (Exception ignored) {
-      // 换个二值化再试一次
+  /**
+   * 解一帧。只解 crop 区域（屏幕实际看得见的那部分），并且只认 QR 格式 ——
+   * 这两点是识别速度的关键：像素少了、也不再逐个试其他条码格式。
+   */
+  private String decode(byte[] data, int width, int height, boolean secondPass) {
+    int left = cropLeft;
+    int top = cropTop;
+    int w = cropWidth;
+    int h = cropHeight;
+    if (w <= 0 || h <= 0 || left + w > width || top + h > height) {
+      left = 0;
+      top = 0;
+      w = width;
+      h = height;
     }
+
+    LuminanceSource source = new PlanarYUVLuminanceSource(data, width, height, left, top, w, h, false);
+    QRCodeReader reader = new QRCodeReader();
     try {
-      Result r = reader.decodeWithState(new BinaryBitmap(new GlobalHistogramBinarizer(source)));
-      return r.getText();
+      return reader.decode(new BinaryBitmap(new HybridBinarizer(source))).getText();
     } catch (Exception ignored) {
-    } finally {
-      reader.reset();
+      // 换一种二值化再试
+    }
+    if (secondPass) {
+      try {
+        return reader.decode(new BinaryBitmap(new GlobalHistogramBinarizer(source))).getText();
+      } catch (Exception ignored) {
+      }
     }
     return null;
   }
