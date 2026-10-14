@@ -47,5 +47,19 @@
       android:textColor="#FFFFFFFF"
       android:textSize="17sp"
       android:textStyle="bold" />
+
+    <!-- 扫不上时按这个：把当前画面存进相册，可以发出来排查 -->
+    <TextView
+      android:id="@+id/snapshot"
+      android:layout_width="wrap_content"
+      android:layout_height="40dp"
+      android:gravity="center"
+      android:paddingStart="12dp"
+      android:paddingEnd="12dp"
+      android:background="#33FFFFFF"
+      android:text="存图排查"
+      android:textColor="#FFFFFFFF"
+      android:textSize="13sp"
+      android:contentDescription="保存当前画面" />
   </LinearLayout>
 </FrameLayout>

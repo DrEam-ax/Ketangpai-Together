@@ -2,15 +2,21 @@ package com.ktp.scanner;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
 import android.graphics.Point;
 import android.hardware.Camera;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -21,6 +27,7 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
@@ -37,12 +44,13 @@ import com.google.zxing.PlanarYUVLuminanceSource;
 import com.google.zxing.common.GlobalHistogramBinarizer;
 import com.google.zxing.common.HybridBinarizer;
 import com.google.zxing.qrcode.QRCodeReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-
-import java.util.List;
 import java.util.Locale;
 
 /**
@@ -113,6 +121,33 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   private int baseSurfaceW = 0;
   private int baseSurfaceH = 0;
 
+  /**
+   * 是否设上了「连续对焦」模式。
+   * 如果设备不支持连续对焦，就得靠定时调 autoFocus() 兜着 ——
+   * 否则相机停在某个焦距上不动，画面一直糊，任何检测算法都救不回来。
+   */
+  private boolean continuousFocus = false;
+
+  /** ML Kit 分块扫描的网格数与每块占比 */
+  private static final int ML_GRID = 3;
+  private static final float ML_TILE_FRAC = 0.55f;
+
+  private volatile long lastAutoFocus = 0;
+  /** ML Kit 分块扫描：-1 表示整幅，0..8 表示 3x3 里的某一块 */
+  private int mlTile = -1;
+  /** 整幅 / 子块各自一个**长度精确**的缓冲（见 buildNv21Crop 的说明） */
+  private byte[] mlFullBuf;
+  private byte[] mlTileBuf;
+  /** ML Kit 最近一次报错，用来排查"它到底有没有在工作" */
+  private volatile String mlLastError = null;
+
+  // 「存图排查」用
+  private volatile boolean wantCapture = false;
+  private volatile boolean capturedReady = false;
+  private byte[] captureBuf;
+  private volatile int capturedW = 0;
+  private volatile int capturedH = 0;
+
   private ScaleGestureDetector scaleDetector;
   private GestureDetector tapDetector;
 
@@ -151,6 +186,14 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
           @Override
           public void onClick(View v) {
             cancel();
+          }
+        });
+
+    findViewById(R.id.snapshot).setOnClickListener(
+        new View.OnClickListener() {
+          @Override
+          public void onClick(View v) {
+            requestSnapshot();
           }
         });
 
@@ -386,10 +429,26 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       }
 
       p.setPreviewFormat(ImageFormat.NV21);
+
+      // 对焦模式必须「有兜底」。
+      // 之前只处理了 CONTINUOUS_PICTURE：设备不支持时一个模式都不设，
+      // 而很多机型默认是 FOCUS_MODE_AUTO —— AUTO 不主动调 autoFocus() 就永远不对焦，
+      // 取景画面一直是虚的，小二维码根本无从识别。
       try {
         List<String> focus = p.getSupportedFocusModes();
-        if (focus != null && focus.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
+        continuousFocus = false;
+        if (focus != null && focus.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+          // 连续视频对焦是专门为「预览流」设计的，比 continuous picture 更适合扫码
+          p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+          continuousFocus = true;
+        } else if (focus != null
+            && focus.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
           p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+          continuousFocus = true;
+        } else if (focus != null && focus.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+          p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+        } else if (focus != null && focus.contains(Camera.Parameters.FOCUS_MODE_MACRO)) {
+          p.setFocusMode(Camera.Parameters.FOCUS_MODE_MACRO);
         }
       } catch (Exception ignored) {
       }
@@ -586,6 +645,18 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     lastDecode = now;
     frameCount++;
 
+    // 有些机型不支持连续对焦，那就得定时主动触发一次 ——
+    // 老式扫码 App 都是这么干的。不这么做相机就停在初始焦距上不挪窝。
+    if (!continuousFocus && camera != null && now - lastAutoFocus > 1500) {
+      lastAutoFocus = now;
+      try {
+        camera.autoFocus(null);
+      } catch (Exception ignored) {
+      }
+    }
+
+    // 留着给"存图排查"用（真正拷贝在下面 wantCapture 分支里做）
+
     int w = previewWidth;
     int h = previewHeight;
     if (w <= 0 || h <= 0) {
@@ -594,6 +665,26 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       h = s.height;
       previewWidth = w;
       previewHeight = h;
+    }
+
+    // 「存图排查」：按需把这一帧拷下来。
+    // 必须在这里拷贝而不是留着 data 的引用 —— 官方文档明确说
+    // onPreviewFrame 的 buffer 只在回调期间有效。
+    if (wantCapture) {
+      wantCapture = false;
+      final int need = w * h * 3 / 2;
+      if (captureBuf == null || captureBuf.length < need) captureBuf = new byte[need];
+      System.arraycopy(data, 0, captureBuf, 0, Math.min(need, data.length));
+      capturedW = w;
+      capturedH = h;
+      capturedReady = true;
+      uiPost(
+          new Runnable() {
+            @Override
+            public void run() {
+              doSaveCaptured();
+            }
+          });
     }
 
     // 每帧先按原尺寸快速解（正常大小的二维码靠这条）；
@@ -621,18 +712,54 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   /**
    * 用 ML Kit 再试一次。异步执行，结果回到主线程。
    *
-   * 用 mlBusy 防止任务堆积：ML Kit 一次处理要几十到上百毫秒，
+   * 关键点：**喂给它的是裁剪后的小图，不是整帧**。
+   * 小二维码在整帧 200 万像素里只是个很小的目标，ML Kit 内部还会再缩放一次，很容易漏。
+   * 裁成 55% 的子块后，码在输入图里占的比例大 3 倍多，检出率完全不同 ——
+   * 这也是「取景框」这个交互存在的意义。
+   *
+   * 轮流看「整幅 + 3x3 九块」，好处是**完全不需要算坐标映射**：
+   * 不管用户把码放在画面哪个位置，总有一块能完整包住它。
+   *
+   * 用 mlBusy 防止任务堆积：ML Kit 一次要几十到上百毫秒，
    * 不等它做完就继续投喂只会把队列塞满、越扫越卡。
    */
   private void runMlKit(byte[] data, int width, int height) {
     initMlKit();
     if (mlScanner == null || mlBusy || finished) return;
 
+    int left = cropLeft;
+    int top = cropTop;
+    int w = cropWidth;
+    int h = cropHeight;
+    if (w <= 0 || h <= 0 || left + w > width || top + h > height) {
+      left = 0;
+      top = 0;
+      w = width;
+      h = height;
+    }
+
+    boolean full = mlTile < 0;
+    if (!full) {
+      int tileW = Math.max(64, Math.round(w * ML_TILE_FRAC));
+      int tileH = Math.max(64, Math.round(h * ML_TILE_FRAC));
+      int maxOffX = Math.max(0, w - tileW);
+      int maxOffY = Math.max(0, h - tileH);
+      int tx = mlTile % ML_GRID;
+      int ty = mlTile / ML_GRID;
+      left += maxOffX * tx / (ML_GRID - 1);
+      top += maxOffY * ty / (ML_GRID - 1);
+      w = tileW;
+      h = tileH;
+    }
+    mlTile = (mlTile + 1 >= ML_GRID * ML_GRID) ? -1 : mlTile + 1;
+
+    byte[] buf = buildNv21Crop(data, width, height, left, top, w, h, full);
+    if (buf == null) return;
+
     final InputImage image;
     try {
       image =
-          InputImage.fromByteArray(
-              data, width, height, displayRotation, InputImage.IMAGE_FORMAT_NV21);
+          InputImage.fromByteArray(buf, w, h, displayRotation, InputImage.IMAGE_FORMAT_NV21);
     } catch (Throwable t) {
       return;
     }
@@ -662,11 +789,64 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
                 @Override
                 public void onFailure(Exception e) {
                   mlBusy = false;
+                  mlLastError = String.valueOf(e.getMessage());
                 }
               });
     } catch (Throwable t) {
       mlBusy = false;
+      mlLastError = String.valueOf(t.getMessage());
     }
+  }
+
+  /**
+   * 从整帧 NV21 裁出一块，拼成一块**尺寸严格等于 w*h*3/2** 的独立 NV21。
+   *
+   * 为什么必须严格相等：InputImage.fromByteArray 会校验长度，
+   * 传一个复用的、偏大的数组会直接抛异常（而我原来是 catch 掉静默返回的，
+   * 那就变成"ML Kit 好像从来没生效"却查不出原因）。
+   *
+   * 色度是 2x2 下采样的，所以起点和尺寸都取偶数，否则色度会错位。
+   * 条码检测其实只用亮度，但长度校验过不了就没意义，所以还是老实搬过去。
+   */
+  private byte[] buildNv21Crop(
+      byte[] src, int srcW, int srcH, int l, int t, int w, int h, boolean fullFrame) {
+    l &= ~1;
+    t &= ~1;
+    w &= ~1;
+    h &= ~1;
+    if (l < 0) l = 0;
+    if (t < 0) t = 0;
+    if (l + w > srcW) w = (srcW - l) & ~1;
+    if (t + h > srcH) h = (srcH - t) & ~1;
+    if (w <= 0 || h <= 0) return null;
+
+    final int need = w * h * 3 / 2;
+    byte[] dst;
+    if (fullFrame) {
+      if (mlFullBuf == null || mlFullBuf.length != need) mlFullBuf = new byte[need];
+      dst = mlFullBuf;
+    } else {
+      if (mlTileBuf == null || mlTileBuf.length != need) mlTileBuf = new byte[need];
+      dst = mlTileBuf;
+    }
+
+    // 亮度平面：逐行搬
+    for (int y = 0; y < h; y++) {
+      System.arraycopy(src, (t + y) * srcW + l, dst, y * w, w);
+    }
+
+    // 色度平面：源里每两行存一份
+    final int dstChroma = w * h;
+    if (src.length >= srcW * srcH * 3 / 2) {
+      final int srcY = srcW * srcH;
+      for (int y = 0; y < h; y += 2) {
+        System.arraycopy(src, srcY + ((t + y) >> 1) * srcW + l, dst, dstChroma + (y >> 1) * w, w);
+      }
+    } else {
+      // 拿不到色度就填中性灰 —— 对条码检测没有任何影响
+      java.util.Arrays.fill(dst, dstChroma, need, (byte) 128);
+    }
+    return dst;
   }
 
   /**
@@ -761,6 +941,135 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       }
     }
     return null;
+  }
+
+  // ------------------------------------------------------------------ 存图排查
+
+  private void requestSnapshot() {
+    if (capturedW <= 0 && previewWidth <= 0) {
+      toast("还没取到画面，稍等一下再按");
+      return;
+    }
+    capturedReady = false;
+    wantCapture = true;
+    toast("正在抓取当前画面…");
+  }
+
+  /**
+   * 把抓到的这一帧写成 JPEG 存进相册。
+   *
+   * 存的是**相机原始亮度平面**（没有经过任何缩放/压缩），也就是解码器真正看到的那张图 ——
+   * 这样拿过来就能判断：是糊了？码太小？还是投影反光。
+   * 会按显示方向旋转成正的，方便人眼看。
+   */
+  private void doSaveCaptured() {
+    if (!capturedReady) return;
+    final byte[] data = captureBuf;
+    final int w = capturedW;
+    final int h = capturedH;
+    if (data == null || w <= 0 || h <= 0) {
+      toast("抓取失败");
+      return;
+    }
+
+    OutputStream os = null;
+    String shownPath;
+    try {
+      final int[] argb = new int[w * h];
+      for (int i = 0; i < argb.length; i++) {
+        final int y = data[i] & 0xFF;
+        argb[i] = 0xFF000000 | (y << 16) | (y << 8) | y;
+      }
+      Bitmap bmp = Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
+
+      // 旋转成竖的（和用户在屏幕上看到的朝向一致）
+      if (displayRotation != 0) {
+        android.graphics.Matrix m = new android.graphics.Matrix();
+        m.postRotate(displayRotation);
+        Bitmap rotated =
+            Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
+        if (rotated != bmp) bmp.recycle();
+        bmp = rotated;
+      }
+
+      final String name =
+          "ktp-"
+              + new java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+                  .format(new java.util.Date())
+              + ".jpg";
+
+      if (Build.VERSION.SDK_INT >= 29) {
+        ContentValues cv = new ContentValues();
+        cv.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+        cv.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        cv.put(
+            MediaStore.Images.Media.RELATIVE_PATH,
+            Environment.DIRECTORY_PICTURES + "/KTP排查");
+        Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+        if (uri == null) throw new Exception("系统没给相册写入位置");
+        os = getContentResolver().openOutputStream(uri);
+        shownPath = "相册 / Pictures/KTP排查/" + name;
+      } else {
+        File dir =
+            new File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                "KTP排查");
+        if (!dir.exists() && !dir.mkdirs()) throw new Exception("建目录失败");
+        File f = new File(dir, name);
+        os = new FileOutputStream(f);
+        shownPath = f.getAbsolutePath();
+      }
+
+      if (os == null) throw new Exception("打不开输出流");
+      bmp.compress(Bitmap.CompressFormat.JPEG, 92, os);
+      os.close();
+      os = null;
+      bmp.recycle();
+
+      toast("已保存：" + shownPath);
+      // 把这些数字也记进日志：发图时一起报过来，能直接定位问题
+      android.util.Log.i(
+          "ktp-scan",
+          "snapshot "
+              + w
+              + "x"
+              + h
+              + " rot="
+              + displayRotation
+              + " crop="
+              + cropLeft
+              + ","
+              + cropTop
+              + " "
+              + cropWidth
+              + "x"
+              + cropHeight
+              + " z="
+              + appliedZoomLevel
+              + "/"
+              + maxZoomLevel
+              + " contFocus="
+              + continuousFocus
+              + " mlErr="
+              + mlLastError);
+    } catch (Throwable t) {
+      toast("保存失败：" + t.getMessage());
+    } finally {
+      try {
+        if (os != null) os.close();
+      } catch (Exception ignored) {
+      }
+    }
+  }
+
+  private void toast(final String message) {
+    uiPost(
+        new Runnable() {
+          @Override
+          public void run() {
+            Toast.makeText(ScanActivity.this, message, Toast.LENGTH_SHORT).show();
+          }
+        });
   }
 
   // ------------------------------------------------------------------ 结束
