@@ -130,12 +130,10 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   private boolean continuousFocus = false;
 
   /** ML Kit 分块扫描的网格数与每块占比 */
-  private static final int ML_GRID = 3;
-  private static final float ML_TILE_FRAC = 0.55f;
+  /** ML Kit 子块边长占短边的比例（正方形块） */
+  private static final float ML_TILE_FRAC = 0.6f;
 
   private volatile long lastAutoFocus = 0;
-  /** 远距模式：锁无限远对焦 + 3 倍变焦（应对"教室大屏离得远就扫不上"） */
-  private volatile boolean farMode = false;
   /** ML Kit 分块扫描：-1 表示整幅，0..8 表示 3x3 里的某一块 */
   private int mlTile = -1;
   /** 整幅 / 子块各自一个**长度精确**的缓冲（见 buildNv21Crop 的说明） */
@@ -143,6 +141,10 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   private byte[] mlTileBuf;
   /** ML Kit 最近一次报错，用来排查"它到底有没有在工作" */
   private volatile String mlLastError = null;
+  /** ML Kit 的进展计数：处理了多少帧、有没有异常 —— 屏幕上看得到 */
+  private volatile int mlProcessed = 0;
+  private volatile int mlFailed = 0;
+  private volatile long lastDebugUpdate = 0;
 
   // 「存图排查」用
   private volatile boolean wantCapture = false;
@@ -197,14 +199,6 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
           @Override
           public void onClick(View v) {
             requestSnapshot();
-          }
-        });
-
-    findViewById(R.id.farmode).setOnClickListener(
-        new View.OnClickListener() {
-          @Override
-          public void onClick(View v) {
-            toggleFarMode((TextView) v);
           }
         });
 
@@ -658,8 +652,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     // 有些机型不支持连续对焦，那就得定时主动触发一次 ——
     // 老式扫码 App 都是这么干的。不这么做相机就停在初始焦距上不挪窝。
-    // 远距模式下故意不触发：那个模式就是要锁死焦距。
-    if (!continuousFocus && !farMode && camera != null && now - lastAutoFocus > 1500) {
+    if (!continuousFocus && camera != null && now - lastAutoFocus > 1500) {
       lastAutoFocus = now;
       try {
         camera.autoFocus(null);
@@ -719,6 +712,63 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     if (frameCount % 2 == 0) {
       runMlKit(data, w, h);
     }
+
+    // 每 500ms 把状态刷到屏幕上 —— 真机出问题时截个图就能定位
+    if (now - lastDebugUpdate > 500) {
+      lastDebugUpdate = now;
+      updateDebugText();
+    }
+  }
+
+  /**
+   * 把诊断信息画到取景框下方。
+   *
+   * 加这个是因为：我们没法在电脑上跑 ML Kit，而真机一次往返成本很高。
+   * 把「ML Kit 到底有没有在工作、处理了多少帧、报了什么错」直接显示出来，
+   * 一张截图就能回答所有问题。
+   */
+  private void updateDebugText() {
+    final ViewfinderView vf = viewfinder;
+    if (vf == null) return;
+
+    StringBuilder sb = new StringBuilder();
+    sb.append("预览 ")
+        .append(previewWidth)
+        .append('x')
+        .append(previewHeight)
+        .append("  裁剪 ")
+        .append(cropWidth)
+        .append('x')
+        .append(cropHeight)
+        .append("  变焦 ")
+        .append(appliedZoomLevel + 1)
+        .append('/')
+        .append(maxZoomLevel + 1);
+    sb.append('\n');
+    if (mlScanner != null) {
+      sb.append("MLKit 就绪  处理 ")
+          .append(mlProcessed)
+          .append("  失败 ")
+          .append(mlFailed);
+    } else if (mlInitFailed) {
+      sb.append("MLKit 初始化失败");
+    } else {
+      sb.append("MLKit 尚未启动");
+    }
+    if (mlLastError != null) {
+      sb.append("  错误: ").append(mlLastError);
+    }
+    sb.append('\n').append("帧 ").append(frameCount);
+    sb.append(continuousFocus ? "  连续对焦" : "  定时对焦");
+
+    final String text = sb.toString();
+    uiPost(
+        new Runnable() {
+          @Override
+          public void run() {
+            vf.setDebugText(text);
+          }
+        });
   }
 
   /**
@@ -751,19 +801,28 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     boolean full = mlTile < 0;
+    int count = 1;
     if (!full) {
-      int tileW = Math.max(64, Math.round(w * ML_TILE_FRAC));
-      int tileH = Math.max(64, Math.round(h * ML_TILE_FRAC));
-      int maxOffX = Math.max(0, w - tileW);
-      int maxOffY = Math.max(0, h - tileH);
-      int tx = mlTile % ML_GRID;
-      int ty = mlTile / ML_GRID;
-      left += maxOffX * tx / (ML_GRID - 1);
-      top += maxOffY * ty / (ML_GRID - 1);
-      w = tileW;
-      h = tileH;
+      // 用**正方形**子块（边长按短边算）。
+      // 之前用 55% 的矩形块，长边 1056 而码只有 380 宽 —— 码在输入图里仍只占 36%，
+      // ML Kit 内部再一缩放就更小了。改成正方形后边长约 518，码占 73%。
+      int side = Math.max(96, Math.round(Math.min(w, h) * ML_TILE_FRAC));
+      int step = Math.max(1, Math.round(side * 0.5f));
+      int cols = Math.max(1, (w - side) / step + 1);
+      int rows = Math.max(1, (h - side) / step + 1);
+      count = cols * rows;
+      if (mlTile >= count) mlTile = -1;
+      int idx = Math.max(0, mlTile);
+      int tx = idx % cols;
+      int ty = idx / cols;
+      int tw = Math.min(side, w);
+      int th = Math.min(side, h);
+      left += Math.min(Math.max(0, w - tw), tx * step);
+      top += Math.min(Math.max(0, h - th), ty * step);
+      w = tw;
+      h = th;
     }
-    mlTile = (mlTile + 1 >= ML_GRID * ML_GRID) ? -1 : mlTile + 1;
+    mlTile = (mlTile + 1 >= count) ? -1 : mlTile + 1;
 
     byte[] buf = buildNv21Crop(data, width, height, left, top, w, h, full);
     if (buf == null) return;
@@ -785,6 +844,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
                 @Override
                 public void onSuccess(List<Barcode> barcodes) {
                   mlBusy = false;
+                  mlProcessed++;
                   if (finished) return;
                   for (Barcode b : barcodes) {
                     String value = b.getRawValue();
@@ -801,6 +861,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
                 @Override
                 public void onFailure(Exception e) {
                   mlBusy = false;
+                  mlFailed++;
                   mlLastError = String.valueOf(e.getMessage());
                 }
               });
@@ -955,69 +1016,6 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     return null;
   }
 
-  // ------------------------------------------------------------------ 远距模式
-
-  /**
-   * 远距离模式：锁「无限远」对焦 + 拉到 3 倍变焦。
-   *
-   * 为什么需要这个开关：
-   * 教室大屏上的二维码是远距离 + 低对比度的组合。反差式自动对焦在这种画面上
-   * 找不到足够的对比度，会来回拉风箱（hunting）——画面忽虚忽实，
-   * 检测算法再强也没用，表现就是"离远了怎么都扫不上，走近就行"。
-   * 而 2 米以外的景物本来就在无限远附近，直接锁死反而最清楚。
-   *
-   * 近处扫码请关掉它（远距离模式下近处的码会虚）。
-   */
-  private void toggleFarMode(final TextView button) {
-    farMode = !farMode;
-    button.setText(farMode ? "远距模式·开" : "远距模式");
-    button.setBackgroundColor(farMode ? 0xFF07C160 : 0x33FFFFFF);
-
-    if (camHandler != null) {
-      camHandler.post(
-          new Runnable() {
-            @Override
-            public void run() {
-              Camera cam = camera;
-              if (cam == null) return;
-              try {
-                // 有对焦在进行时必须先取消，否则改模式会抛异常
-                cam.cancelAutoFocus();
-              } catch (Exception ignored) {
-              }
-              try {
-                Camera.Parameters p = cam.getParameters();
-                if (farMode) {
-                  List<String> modes = p.getSupportedFocusModes();
-                  if (modes != null && modes.contains(Camera.Parameters.FOCUS_MODE_INFINITY)) {
-                    p.setFocusMode(Camera.Parameters.FOCUS_MODE_INFINITY);
-                  } else if (modes != null
-                      && modes.contains(Camera.Parameters.FOCUS_MODE_FIXED)) {
-                    p.setFocusMode(Camera.Parameters.FOCUS_MODE_FIXED);
-                  }
-                } else if (continuousFocus) {
-                  List<String> modes = p.getSupportedFocusModes();
-                  if (modes != null && modes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
-                    p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
-                  } else {
-                    p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
-                  }
-                } else {
-                  p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
-                }
-                cam.setParameters(p);
-              } catch (Exception ignored) {
-              }
-            }
-          });
-    }
-
-    // 顺手拉到 3 倍：远了东西太小，多占点像素总没坏处
-    pinchScale = farMode ? 3f : 1f;
-    applyZoom();
-    toast(farMode ? "远距模式：已锁无限远对焦并放大 3 倍" : "已关闭远距模式");
-  }
-
   // ------------------------------------------------------------------ 存图排查
 
   private void requestSnapshot() {
@@ -1036,7 +1034,8 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
             + (appliedZoomLevel + 1)
             + "/"
             + (maxZoomLevel + 1)
-            + (farMode ? " · 远距模式" : ""));
+            + " · MLKit"
+            + (mlScanner != null ? "就绪" : mlInitFailed ? "失败" : "未启动"));
   }
 
   /**

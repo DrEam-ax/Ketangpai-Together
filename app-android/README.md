@@ -372,3 +372,53 @@ snapshot 1920x1080 rot=90 crop=0,108 1920x864 z=3/5 contFocus=false mlErr=null
 
 把图发出来就能直接判断：是糊了（对焦）、码太小（分辨率/倍率）、还是反光（对比度），
 不用再靠猜。
+
+### 0.3.4：用真实失败帧做的离线实验，把根因钉死了
+
+用户把「扫不上的那一帧」存了下来（就是「存图排查」按钮的产物）。有了真实样本，
+就不用再靠真机往返试错了 —— **在电脑上用同一张图跑实验**即可。
+
+**结论：问题不在放大倍数、不在对焦、不在预处理，而在解码库本身。**
+
+| 解码器 | 同一张帧 |
+|---|---|
+| **ZXing Java 3.5.3**（App 用的） | ❌ **120 种预处理组合全败**（放大 1~5 倍 × 平场校正/锐化/Otsu/中值 × 白边，两种二值化） |
+| zxing-cpp | ✅ 原分辨率就能解（**但只有用「固定阈值」二值化时**；默认的局部自适应要放大 3 倍才行） |
+| 微信 | ✅ 直接能解 |
+
+关键的一步：把 zxing-cpp 的参数扫一遍，发现它换成 `FixedThreshold` 后**原分辨率就成功**了 ——
+说明这张帧并不算难，是**局部自适应二值化**在「大面积灰色 UI 边框 + 屏幕反光」下把它毁了。
+于是我把 ZXing Java 也换成固定阈值（自己算 BitMatrix，绕过它自带的二值化）——
+**依然失败**。这就排除了二值化，坐实了是 ZXing Java 的**检测器**找不到定位图案。
+
+复现实验代码都在 `tools/scan-debug/`（不需要手机）：
+
+```bash
+# 用真正的 ZXing Java 复现失败，并扫各种裁剪/放大/提示组合
+javac -encoding UTF-8 -cp core-3.5.3.jar -d out ZxingProbe.java
+java -cp "out;core-3.5.3.jar" ZxingProbe frame.jpg
+
+# 120 种预处理组合
+javac -encoding UTF-8 -cp core-3.5.3.jar -d out PreprocessProbe.java
+java -cp "out;core-3.5.3.jar" PreprocessProbe frame.jpg
+
+# 固定阈值 vs 局部自适应（就是这一步找到根因的）
+javac -encoding UTF-8 -cp core-3.5.3.jar -d out FixedThresholdProbe.java
+java -cp "out;core-3.5.3.jar" FixedThresholdProbe frame.jpg
+```
+
+顺带纠正了一个我自己的误判：我曾以为「三条路全失败」= 完全扫不上，
+实际是**只在远距离失败**（走近就行）。所以在动算法之前先问清楚现象，能省很多无效改动。
+
+### 屏幕上的诊断信息（0.3.4 起）
+
+取景框下方会实时显示：
+
+```
+预览 1920x864  裁剪 1920x864  变焦 6/6
+MLKit 就绪  处理 37  失败 0
+帧 812  连续对焦
+```
+
+加这个的原因：**ML Kit 没法在电脑上跑**，而真机往返一次成本很高。
+把它「有没有在工作、处理了多少帧、报了什么错」直接显示出来，一张截图就能定性。

@@ -36,6 +36,8 @@ public class ViewfinderView extends View {
   private boolean found = false;
   private boolean animating = false;
   private String zoomLabel = null;
+  /** 屏幕上的诊断信息（预览尺寸 / ML Kit 状态等）—— 截图就能看到，不用接电脑 */
+  private String debugText = null;
 
   public ViewfinderView(Context context, AttributeSet attrs) {
     super(context, attrs);
@@ -131,6 +133,22 @@ public class ViewfinderView extends View {
       }
     }
 
+    // 诊断信息：小字、贴底、不影响取景
+    if (debugText != null) {
+      Paint p = hintPaint2;
+      p.setTextAlign(Paint.Align.LEFT);
+      p.setTextSize(10f * density);
+      p.setColor(0xFFB0B8C4);
+      float y = frame.bottom + 78 * density;
+      for (String line : debugText.split("\n")) {
+        canvas.drawText(line, 10 * density, y, p);
+        y += 13 * density;
+      }
+      p.setTextAlign(Paint.Align.CENTER);
+      p.setTextSize(12f * density);
+      p.setColor(0xFF9AA0A6);
+    }
+
     if (!found) {
       stepScanLine();
       postInvalidateDelayed(16);
@@ -164,6 +182,12 @@ public class ViewfinderView extends View {
   /** 双指缩放时在框上方显示倍率；传 null 表示隐藏。 */
   public void setZoomLabel(String label) {
     zoomLabel = label;
+    postInvalidate();
+  }
+
+  /** 屏幕上的诊断信息（多行）；传 null 隐藏。 */
+  public void setDebugText(String text) {
+    debugText = text;
     postInvalidate();
   }
 
