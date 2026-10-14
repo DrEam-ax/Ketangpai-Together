@@ -43,3 +43,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# zxing-cpp 本地编译（源码与产物都不入库）
+tools/zxing-cpp-build/

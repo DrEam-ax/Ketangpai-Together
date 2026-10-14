@@ -130,12 +130,15 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   private boolean continuousFocus = false;
 
   /** ML Kit 分块扫描的网格数与每块占比 */
-  /** ML Kit 子块边长占短边的比例（正方形块） */
-  private static final float ML_TILE_FRAC = 0.6f;
 
   private volatile long lastAutoFocus = 0;
-  /** ML Kit 分块扫描：-1 表示整幅，0..8 表示 3x3 里的某一块 */
-  private int mlTile = -1;
+  /** 取景框对应到 buffer 的矩形（ML Kit 优先扫这里） */
+  private int boxX0 = 0;
+  private int boxY0 = 0;
+  private int boxX1 = 0;
+  private int boxY1 = 0;
+  /** 当前要扫的区域序号：0=取景框 1=取景框镜像 2=可见区域整幅 */
+  private volatile int mlRegion = 0;
   /** 整幅 / 子块各自一个**长度精确**的缓冲（见 buildNv21Crop 的说明） */
   private byte[] mlFullBuf;
   private byte[] mlTileBuf;
@@ -505,6 +508,8 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     baseSurfaceW = Math.round(displayW * scale);
     baseSurfaceH = Math.round(displayH * scale);
 
+    computeBoxRegion(screen, scale, swapped);
+
     runOnUiThread(
         new Runnable() {
           @Override
@@ -513,6 +518,52 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
             applySurfaceSize(pinchScale);
           }
         });
+  }
+
+  /**
+   * 算出「取景框」那块在 buffer 里对应的矩形 —— ML Kit 就扫这一块。
+   *
+   * 为什么值得单独算：盲目分块需要很小的步长才能保证不漏（步长必须 ≤ 块边长 - 码边长），
+   * 结果就是几十块轮一圈、每块还被切掉一截，ML Kit 实际从没拿到过完整的二维码。
+   * 而取景框是用户主动瞄准的地方，直接扫它就够了：一块就能覆盖，而且码占的比例最大。
+   *
+   * 坐标映射是**用真机数据反推验证过的**（拿保存帧里二维码的位置和截图里取景框的位置交叉比对）：
+   *   竖屏时 buffer 是横的，要转 90 度，所以
+   *     screenX = bufferY * scale   ->  bufferY = screenX / scale
+   *     screenY = bufferX * scale   ->  bufferX = screenY / scale
+   * 因为不同机型传感器方向可能不同，这里同时保留**镜像那一份**作为备选，
+   * 两块轮着扫，不依赖对旋转方向的判断。
+   */
+  private void computeBoxRegion(Point screen, float scale, boolean swapped) {
+    float density = getResources().getDisplayMetrics().density;
+    // 与 ViewfinderView.onSizeChanged 保持一致（改一处要改两处）
+    float side = Math.min(screen.x * 0.68f, screen.y * 0.46f);
+    float left = (screen.x - side) / 2f;
+    float top = screen.y * 0.34f - side / 2f;
+    if (top < 40 * density) top = 40 * density;
+
+    // 稍微放大一点，用户没完全对准也能兜住
+    float margin = 1.15f;
+    float half = side * margin / 2f;
+    float cx = left + side / 2f;
+    float cy = top + side / 2f;
+
+    if (swapped) {
+      boxY0 = Math.round((cx - half) / scale);
+      boxY1 = Math.round((cx + half) / scale);
+      boxX0 = Math.round((cy - half) / scale);
+      boxX1 = Math.round((cy + half) / scale);
+    } else {
+      boxX0 = Math.round((cx - half) / scale);
+      boxX1 = Math.round((cx + half) / scale);
+      boxY0 = Math.round((cy - half) / scale);
+      boxY1 = Math.round((cy + half) / scale);
+    }
+    boxX0 = Math.max(0, boxX0);
+    boxY0 = Math.max(0, boxY0);
+    boxX1 = Math.min(previewWidth, boxX1);
+    boxY1 = Math.min(previewHeight, boxY1);
+    mlRegion = 0;
   }
 
   private void applySurfaceSize(float scale) {
@@ -749,7 +800,11 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       sb.append("MLKit 就绪  处理 ")
           .append(mlProcessed)
           .append("  失败 ")
-          .append(mlFailed);
+          .append(mlFailed)
+          .append("  区域 ")
+          .append(boxX1 - boxX0)
+          .append('x')
+          .append(boxY1 - boxY0);
     } else if (mlInitFailed) {
       sb.append("MLKit 初始化失败");
     } else {
@@ -800,31 +855,37 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
       h = height;
     }
 
-    boolean full = mlTile < 0;
-    int count = 1;
-    if (!full) {
-      // 用**正方形**子块（边长按短边算）。
-      // 之前用 55% 的矩形块，长边 1056 而码只有 380 宽 —— 码在输入图里仍只占 36%，
-      // ML Kit 内部再一缩放就更小了。改成正方形后边长约 518，码占 73%。
-      int side = Math.max(96, Math.round(Math.min(w, h) * ML_TILE_FRAC));
-      int step = Math.max(1, Math.round(side * 0.5f));
-      int cols = Math.max(1, (w - side) / step + 1);
-      int rows = Math.max(1, (h - side) / step + 1);
-      count = cols * rows;
-      if (mlTile >= count) mlTile = -1;
-      int idx = Math.max(0, mlTile);
-      int tx = idx % cols;
-      int ty = idx / cols;
-      int tw = Math.min(side, w);
-      int th = Math.min(side, h);
-      left += Math.min(Math.max(0, w - tw), tx * step);
-      top += Math.min(Math.max(0, h - th), ty * step);
-      w = tw;
-      h = th;
-    }
-    mlTile = (mlTile + 1 >= count) ? -1 : mlTile + 1;
+    // 扫哪块：优先取景框（用户瞄准的地方，码占比最大），
+    // 其次取景框的镜像那份（不依赖对旋转方向的判断），偶尔扫整幅兜底。
+    // 顺序 0,1,0,2 —— 取景框占一半的调用次数，因为它命中率最高。
+    final int[] order = {0, 1, 0, 2};
+    int pick = order[Math.floorMod(mlRegion, order.length)];
+    mlRegion++;
 
-    byte[] buf = buildNv21Crop(data, width, height, left, top, w, h, full);
+    boolean isFull = true;
+    if (pick != 2 && boxX1 > boxX0 && boxY1 > boxY0) {
+      int bx0;
+      int bx1;
+      if (pick == 0) {
+        bx0 = boxX0;
+        bx1 = boxX1;
+      } else {
+        // 镜像
+        bx0 = Math.max(0, previewWidth - boxX1);
+        bx1 = Math.min(previewWidth, previewWidth - boxX0);
+      }
+      int by0 = Math.max(0, boxY0);
+      int by1 = Math.min(previewHeight, boxY1);
+      if (bx1 - bx0 >= 64 && by1 - by0 >= 64) {
+        left = bx0;
+        top = by0;
+        w = bx1 - bx0;
+        h = by1 - by0;
+        isFull = false;
+      }
+    }
+
+    byte[] buf = buildNv21Crop(data, width, height, left, top, w, h, isFull);
     if (buf == null) return;
 
     final InputImage image;
