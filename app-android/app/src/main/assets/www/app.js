@@ -258,8 +258,10 @@ function handleScannedText(text) {
 }
 
 // 由原生侧回调（MainActivity.callJs）
-window.onScanResult = function (text) {
+window.onScanResult = function (text, source) {
   setScanning(false);
+  // 记下是哪个检测器认出来的 —— 排查「小二维码扫不上」时这是最关键的一条信息
+  if (source) log(`识别方式：${source}`, "d");
   try {
     handleScannedText(text);
   } catch (err) {

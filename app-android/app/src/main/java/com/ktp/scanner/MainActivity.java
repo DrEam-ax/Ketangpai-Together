@@ -204,7 +204,15 @@ public class MainActivity extends Activity {
       if (resultCode == RESULT_OK && data != null) {
         String text = data.getStringExtra(ScanActivity.EXTRA_TEXT);
         if (text != null && !text.isEmpty()) {
-          callJs("window.onScanResult(" + JSONObject.quote(text) + ")");
+          // 把"是谁认出来的"一起交给页面，方便排查"小二维码扫不上"卡在哪一环
+          String source = data.getStringExtra(ScanActivity.EXTRA_SOURCE);
+          if (source == null) source = "未知";
+          callJs(
+              "window.onScanResult("
+                  + JSONObject.quote(text)
+                  + ", "
+                  + JSONObject.quote(source)
+                  + ")");
           return;
         }
       }

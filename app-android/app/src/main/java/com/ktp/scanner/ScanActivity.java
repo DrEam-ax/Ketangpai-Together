@@ -68,6 +68,8 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
 
   public static final String EXTRA_TEXT = "text";
   public static final String EXTRA_ERROR = "error";
+  /** 是哪个检测器认出来的（ZXing / ZXing·放大 / ML Kit）—— 用来定位"扫不上"到底卡在哪一环 */
+  public static final String EXTRA_SOURCE = "source";
 
   private static final int REQ_CAM = 2001;
   /** 两次解码之间的最小间隔。解码本身不贵了，这里放小一点，多试几次。 */
@@ -130,6 +132,8 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   private BarcodeScanner mlScanner;
   private boolean mlInitFailed = false;
   private volatile boolean mlBusy = false;
+  /** 本次识别是谁做成的，随结果一起回传 */
+  private volatile String foundBy = "ZXing";
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -596,10 +600,13 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     // 每 4 帧再走一次「中心正方形 2 倍放大 + TRY_HARDER」——这是小二维码的救命路径。
     boolean extra = frameCount % 4 == 0;
     String text = decode(data, w, h, extra);
+    String by = "ZXing";
     if (text == null && extra) {
       text = decodeUpscaled(data, w, h);
+      by = "ZXing·放大";
     }
     if (text != null && !text.isEmpty()) {
+      foundBy = by;
       succeed(text);
       return;
     }
@@ -643,6 +650,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
                   for (Barcode b : barcodes) {
                     String value = b.getRawValue();
                     if (value != null && !value.isEmpty()) {
+                      foundBy = "ML Kit";
                       succeed(value);
                       return;
                     }
@@ -768,6 +776,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
           public void run() {
             Intent out = new Intent();
             out.putExtra(EXTRA_TEXT, text);
+            out.putExtra(EXTRA_SOURCE, foundBy);
             setResult(RESULT_OK, out);
             finish();
           }
