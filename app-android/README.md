@@ -422,3 +422,56 @@ MLKit 就绪  处理 37  失败 0
 
 加这个的原因：**ML Kit 没法在电脑上跑**，而真机往返一次成本很高。
 把它「有没有在工作、处理了多少帧、报了什么错」直接显示出来，一张截图就能定性。
+
+### 0.3.6：换掉解码库 —— 编入 zxing-cpp
+
+真机数据（用户截图）显示：`MLKit 就绪 处理 266 失败 0` —— ML Kit 在跑、不报错，
+但认不出来。而离线实验已经证明 zxing-cpp 能解同一张帧。
+
+于是把 zxing-cpp 编成原生库打进 App：`app/src/main/jniLibs/<abi>/libktpzxing.so`
+（arm64-v8a 1.79MB / armeabi-v7a 1.29MB，已 strip）。
+
+**解码顺序**（按实测效果排）：
+
+| 顺序 | 路径 | 说明 |
+|---|---|---|
+| 1 | **zxing-cpp + 固定阈值**，只扫取景框那块 | 唯一被证明能解这种帧的组合 |
+| 2 | ZXing Java | 老路径，够快，正常大小的码靠它 |
+| 3 | zxing-cpp + 局部自适应 | 换一种二值化再试（每 4 帧） |
+| 4 | ZXing Java 放大救援 | 每 4 帧 |
+| 5 | ML Kit | 异步兜底 |
+
+原生库加载失败时（`System.loadLibrary` 抛异常）自动跳过第 1、3 步，
+`cppOk=false` 会显示在屏幕上（`cpp✗`），不影响其它路径。
+
+**怎么重新编**（改了 native 代码或想升级 zxing-cpp 时）：
+
+```bash
+cd tools/zxing-cpp-build
+git clone --depth 1 --branch v2.3.0 https://github.com/zxing-cpp/zxing-cpp.git src
+
+# 1) 编 zxing-cpp 静态库
+$CM  = D:/Android/Sdk/cmake/3.31.6/bin/cmake.exe
+$NDK = D:/Android/Sdk/ndk/27.1.12297006
+$CM -S src -B build-arm64 -G Ninja -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+    -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF -DZXING_EXAMPLES=OFF -DZXING_UNIT_TESTS=OFF -DZXING_BLACKBOX_TESTS=OFF
+$CM --build build-arm64
+
+# 2) 编 JNI 包装 -> libktpzxing.so
+$CM -S jni -B jniA -G Ninja -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+    -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 -DCMAKE_BUILD_TYPE=Release \
+    -DZXING_LIB=D:/.../build-arm64/core/libZXing.a
+$CM --build jniA
+# 拷到 app/src/main/jniLibs/arm64-v8a/ 并用 llvm-strip --strip-unneeded 瘦身
+```
+
+> 四个踩过的坑（都很隐蔽，浪费了不少时间）：
+> 1. `project()` 里**必须同时声明 C 和 CXX**，只写 CXX 会报
+>    `CMAKE_CXX_COMPILER not set, after EnableLanguage`
+> 2. 传给 CMake 的路径**用正斜杠** —— 反斜杠会被当转义符，导致编译器探测失败
+> 3. 构建目录名**不要带短横线**
+> 4. 在 PowerShell 里给 cmake 的输出加 `| Out-Null` 也会让配置失败
+
+> `libktpzxing.so` 只依赖 `liblog/libm/libdl/libc`（C++ 运行时是静态链接的），
+> 所以不需要额外打包 `libc++_shared.so`。

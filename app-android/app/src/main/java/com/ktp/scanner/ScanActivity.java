@@ -139,6 +139,10 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   private int boxY1 = 0;
   /** 当前要扫的区域序号：0=取景框 1=取景框镜像 2=可见区域整幅 */
   private volatile int mlRegion = 0;
+  /** zxing-cpp 是否可用（原生库加载成功） */
+  private boolean cppOk = false;
+  /** 取亮度平面用的复用缓冲 */
+  private byte[] lumBuf;
   /** 整幅 / 子块各自一个**长度精确**的缓冲（见 buildNv21Crop 的说明） */
   private byte[] mlFullBuf;
   private byte[] mlTileBuf;
@@ -182,6 +186,9 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_scan);
+
+    // 原生解码库（zxing-cpp）：加载失败也不影响其它路径
+    cppOk = ZxingCpp.available();
 
     viewfinder = findViewById(R.id.viewfinder);
     surface = findViewById(R.id.preview);
@@ -692,6 +699,28 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
 
   // ------------------------------------------------------------------ 解码
 
+  /**
+   * 用 zxing-cpp 解指定矩形（取的是 NV21 的亮度平面）。
+   * 原生库没加载成功时返回 null，自动走其它路径。
+   */
+  private String decodeWithCpp(
+      byte[] data, int srcW, int srcH, int l, int t, int r, int b, int binarizerMode) {
+    int w = r - l;
+    int h = b - t;
+    if (l < 0) l = 0;
+    if (t < 0) t = 0;
+    if (l + w > srcW) w = srcW - l;
+    if (t + h > srcH) h = srcH - t;
+    if (w <= 0 || h <= 0) return null;
+
+    final int need = w * h;
+    if (lumBuf == null || lumBuf.length < need) lumBuf = new byte[need];
+    for (int y = 0; y < h; y++) {
+      System.arraycopy(data, (t + y) * srcW + l, lumBuf, y * w, w);
+    }
+    return ZxingCpp.decode(lumBuf, w, h, binarizerMode);
+  }
+
   @Override
   public void onPreviewFrame(byte[] data, Camera cam) {
     if (finished || data == null) return;
@@ -743,17 +772,35 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
           });
     }
 
-    // 每帧先按原尺寸快速解（正常大小的二维码靠这条）；
-    // 每 4 帧再走一次「中心正方形 2 倍放大 + TRY_HARDER」——这是小二维码的救命路径。
+    // 解码顺序是按实测效果排的：
+    //   1) zxing-cpp + 固定阈值，只扫取景框那块 —— 唯一被证明能解出这种帧的组合
+    //   2) ZXing Java（老路径，够快，正常大小的码靠它）
+    //   3) zxing-cpp + 局部自适应（换一种二值化再试）
+    //   4) ZXing Java 放大救援
+    //   5) ML Kit（异步兜底）
     boolean extra = frameCount % 4 == 0;
-    String text = decode(data, w, h, extra);
-    String by = "ZXing";
+    String text = null;
+    String by = null;
+
+    if (cppOk && boxX1 > boxX0 && boxY1 > boxY0) {
+      text = decodeWithCpp(data, w, h, boxX0, boxY0, boxX1, boxY1, 0);
+      by = "zxing-cpp";
+    }
+
+    if (text == null) {
+      text = decode(data, w, h, extra);
+      by = "ZXing";
+    }
+    if (text == null && cppOk && extra && boxX1 > boxX0 && boxY1 > boxY0) {
+      text = decodeWithCpp(data, w, h, boxX0, boxY0, boxX1, boxY1, 1);
+      by = "zxing-cpp·自适应";
+    }
     if (text == null && extra) {
       text = decodeUpscaled(data, w, h);
       by = "ZXing·放大";
     }
     if (text != null && !text.isEmpty()) {
-      foundBy = by;
+      foundBy = by == null ? "未知" : by;
       succeed(text);
       return;
     }
@@ -815,6 +862,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
     sb.append('\n').append("帧 ").append(frameCount);
     sb.append(continuousFocus ? "  连续对焦" : "  定时对焦");
+    sb.append(cppOk ? "  cpp✓" : "  cpp✗");
 
     final String text = sb.toString();
     uiPost(
