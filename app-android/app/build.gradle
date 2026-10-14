@@ -1,0 +1,40 @@
+plugins {
+  id 'com.android.application'
+}
+
+android {
+  namespace 'com.ktp.scanner'
+  compileSdk 35
+
+  defaultConfig {
+    applicationId "com.ktp.scanner"
+    minSdk 24
+    targetSdk 35
+    versionCode 4
+    versionName "0.2.2"
+  }
+
+  buildTypes {
+    debug {
+      minifyEnabled false
+    }
+    release {
+      minifyEnabled false
+      // 用 debug 签名，方便直接装真机测试
+      signingConfig signingConfigs.debug
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  packagingOptions {
+    resources.excludes += ['META-INF/*.kotlin_module']
+  }
+}
+
+dependencies {
+  implementation 'com.google.zxing:core:3.5.3'
+}

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>课堂派签到</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>课堂派签到</h1>
+      <div class="sub" id="env"></div>
+    </header>
+
+    <main>
+      <div class="card">
+        <div class="row">
+          <b>要签的人</b>
+          <label class="dim small"><input type="checkbox" id="all" checked /> 全选</label>
+          <span class="dim small" id="count"></span>
+        </div>
+        <div id="accounts" class="accounts"></div>
+
+        <button class="big" id="scan">扫一扫签到</button>
+        <p class="dim small center">对准大屏上的二维码，识别到会自动签到</p>
+
+        <div id="result"></div>
+      </div>
+
+      <div class="card">
+        <details id="addbox">
+          <summary>添加账号</summary>
+          <div class="stack">
+            <input id="k" placeholder="备注名，如 小王" />
+            <input id="e" placeholder="课堂派手机号" />
+            <input id="p" type="password" placeholder="密码" />
+            <button id="add">添加并验证登录</button>
+          </div>
+          <p class="dim small" id="addhint">会先真实登录一次，成功才保存到本机。</p>
+        </details>
+      </div>
+
+      <div class="card">
+        <b class="small dim">日志</b>
+        <div id="log" class="log"></div>
+      </div>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

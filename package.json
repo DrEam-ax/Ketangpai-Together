@@ -1,0 +1,25 @@
+{
+  "name": "ktp-remote-checkin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "课堂派远程扫码签到 - 协议实现、CLI 与本地 Web 控制台",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "web": "node src/server.ts",
+    "cli": "node src/cli.ts",
+    "status": "node src/cli.ts status",
+    "watch": "node src/cli.ts watch",
+    "courses": "node src/cli.ts courses",
+    "whoami": "node src/cli.ts whoami",
+    "demo": "node tools/demo.ts create",
+    "demo:clean": "node tools/demo.ts clean",
+    "demo:list": "node tools/demo.ts list"
+  },
+  "dependencies": {
+    "jimp": "^0.22.12",
+    "jsqr": "^1.4.0"
+  }
+}

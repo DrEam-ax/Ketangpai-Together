@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>课堂派远程签到</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>课堂派远程签到</h1>
+      <div class="who">
+        <select id="who"></select>
+        <span id="identity" class="dim">…</span>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button data-tab="onsite" class="active">现场扫码</button>
+      <button data-tab="status">实时状态</button>
+      <button data-tab="scan">摄像头扫描</button>
+      <button data-tab="manual">手动签到</button>
+    </nav>
+
+    <main>
+      <!-- ============ 现场扫码（给教室里拿手机的人用） ============ -->
+      <section id="tab-onsite" class="tab active">
+        <p class="dim">
+          <b>扫一次，把所有勾选的账号一起签掉。</b>一张票可以签任意多个账号，所以现场的人不需要换账号、也不需要重复扫。
+        </p>
+        <p class="dim" id="lan-hint"></p>
+
+        <div class="row">
+          <label class="dim"><input type="checkbox" id="onsite-all" checked /> 全选</label>
+          <button id="accounts-refresh" class="ghost mini">刷新账号</button>
+          <span id="onsite-count" class="dim"></span>
+        </div>
+        <div id="onsite-accounts" class="accounts"></div>
+
+        <div class="row">
+          <label class="big-btn">
+            📷 拍照扫码签到
+            <input type="file" id="onsite-camera" accept="image/*" capture="environment" hidden />
+          </label>
+          <label class="big-btn ghost">
+            🖼 从相册选图
+            <input type="file" id="onsite-gallery" accept="image/*" hidden />
+          </label>
+        </div>
+
+        <div id="onsite-result"></div>
+
+        <details class="add-account">
+          <summary>添加账号（收集别人的号用）</summary>
+          <div class="row">
+            <input id="acc-key" placeholder="备注名，如 小王" />
+            <input id="acc-email" placeholder="手机号" />
+            <input id="acc-pass" type="password" placeholder="密码" />
+            <button id="acc-add">添加并验证</button>
+          </div>
+          <p class="dim" id="acc-hint">账号会存到本机 config.local.json 里，token 缓存在 .cache/tokens.json。</p>
+        </details>
+      </section>
+      <!-- ============ 实时状态 ============ -->
+      <section id="tab-status" class="tab">
+        <div class="row">
+          <button id="refresh-status">立即刷新</button>
+          <label class="dim"><input type="checkbox" id="auto-refresh" checked /> 每 5 秒自动刷新</label>
+        </div>
+        <div id="status-summary" class="summary dim">尚未刷新</div>
+        <div id="status-list"></div>
+      </section>
+
+      <!-- ============ 摄像头扫描 ============ -->
+      <section id="tab-scan" class="tab">
+        <p class="dim">
+          把摄像头对准大屏幕上的二维码。识别到课堂派签到二维码后会自动提交，不需要手点。
+        </p>
+        <div class="row">
+          <button id="start-scan">开始扫描</button>
+          <button id="stop-scan" disabled>停止</button>
+          <label class="dim"><input type="checkbox" id="scan-autosubmit" checked /> 识别到就自动签到</label>
+        </div>
+        <div class="video-wrap">
+          <video id="video" playsinline muted></video>
+          <div id="scan-hint" class="scan-hint">未开始</div>
+        </div>
+      </section>
+
+      <!-- ============ 手动签到 ============ -->
+      <section id="tab-manual" class="tab">
+        <p class="dim">
+          朋友在教室拍一张二维码照片发你：直接 <b>Ctrl+V 粘贴</b> 到本页，或选择图片文件。
+          也可以直接粘贴二维码里的 URL。
+        </p>
+
+        <label>二维码 URL / 二维码里的文本</label>
+        <textarea id="qr-url" rows="4" placeholder="https://w.ketangpai.com/checkIn/checkinCodeResult?type=2&ticketid=…&expire=…&sign=…"></textarea>
+        <div class="row">
+          <button id="submit-url">提交签到</button>
+        </div>
+
+        <label>或者上传截图 / 照片</label>
+        <input type="file" id="qr-file" accept="image/*" />
+        <div class="row">
+          <label class="dim"><input type="checkbox" id="file-autosubmit" checked /> 识别后自动签到</label>
+        </div>
+      </section>
+
+      <h2 class="log-title">日志</h2>
+      <div id="log" class="log"></div>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

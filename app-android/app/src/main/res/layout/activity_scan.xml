@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="#FF000000"
+  android:clipChildren="true"
+  android:clipToPadding="true">
+
+  <!-- 尺寸在 ScanActivity 里按相机预览的真实宽高比动态设置：
+       等比放大到铺满屏幕后居中，多出来的部分被这个 FrameLayout 裁掉，画面才不会变形 -->
+  <SurfaceView
+    android:id="@+id/preview"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:layout_gravity="center" />
+
+  <com.ktp.scanner.ViewfinderView
+    android:id="@+id/viewfinder"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent" />
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="6dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="14dp"
+    android:paddingBottom="10dp">
+
+    <TextView
+      android:id="@+id/back"
+      android:layout_width="44dp"
+      android:layout_height="44dp"
+      android:gravity="center"
+      android:text="✕"
+      android:textColor="#FFFFFFFF"
+      android:textSize="20sp"
+      android:contentDescription="关闭" />
+
+    <TextView
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:text="扫码签到"
+      android:textColor="#FFFFFFFF"
+      android:textSize="17sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+</FrameLayout>
