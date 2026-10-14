@@ -22,7 +22,6 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 
 /**
  * 课堂派签到 —— 独立客户端。
@@ -116,19 +115,7 @@ public class MainActivity extends Activity {
   }
 
   // ================================================================= IP 伪造
-
-  private static final Random RND = new Random();
-  /** 国内三大运营商常见网段（前三段固定，末段随机） */
-  private static final String[] IP_PREFIX = {
-    "223.104.", "117.136.", "183.232.", "120.196.", "111.24.", // 移动
-    "112.17.", "27.184.", "221.192.", "60.28.", // 联通
-    "106.6.", "171.8.", "218.75.", "58.100.", "180.137.", // 电信
-  };
-
-  /** 生成合法的四段 IPv4（末段 2~253，避开 .0/.1/.255 这类边界） */
-  static String randomIp() {
-    return IP_PREFIX[RND.nextInt(IP_PREFIX.length)] + (2 + RND.nextInt(252));
-  }
+  // 生成/校验都在 IpUtil 里（纯 Java，可用 javac 单测：tools/ip-test/）
 
   private String ipMode() {
     return prefs.getString("ipMode", MODE_PER_ACCOUNT);
@@ -141,16 +128,16 @@ public class MainActivity extends Activity {
 
     if (MODE_SAME.equals(mode)) {
       String shared = prefs.getString("sharedIp", "");
-      if (shared == null || shared.isEmpty() || !isValidIpv4(shared)) {
-        shared = randomIp();
+      if (shared == null || shared.isEmpty() || !IpUtil.isValidIpv4(shared)) {
+        shared = IpUtil.randomIp();
         prefs.edit().putString("sharedIp", shared).apply();
       }
       return shared;
     }
 
     String ip = acc == null ? null : acc.optString("ip", "");
-    if (ip == null || !isValidIpv4(ip)) {
-      ip = randomIp();
+    if (ip == null || !IpUtil.isValidIpv4(ip)) {
+      ip = IpUtil.randomIp();
       if (acc != null) {
         try {
           acc.put("ip", ip);
@@ -161,29 +148,29 @@ public class MainActivity extends Activity {
     return ip;
   }
 
-  /** 必须是严格的四段点分十进制 —— 三段或带端口会被课堂派记成 0.0.0.0。 */
-  static boolean isValidIpv4(String s) {
-    if (s == null) return false;
-    String[] parts = s.split("\\.", -1);
-    if (parts.length != 4) return false;
-    for (String p : parts) {
-      if (p.isEmpty() || p.length() > 3) return false;
-      for (int i = 0; i < p.length(); i++) {
-        if (p.charAt(i) < '0' || p.charAt(i) > '9') return false;
-      }
-      int v = Integer.parseInt(p);
-      if (v < 0 || v > 255) return false;
-    }
-    return true;
-  }
-
   // ================================================================= 桥
 
   public class Bridge {
 
     @JavascriptInterface
     public String listAccounts() {
-      return prefs.getString("accounts", "[]");
+      // 顺手修复历史数据：早期版本存下来的 IP 只有三段（非法），
+      // 那会导致提交时这个头根本不发出去、服务端记下手机真实 IP。
+      try {
+        JSONArray arr = new JSONArray(prefs.getString("accounts", "[]"));
+        boolean changed = false;
+        for (int i = 0; i < arr.length(); i++) {
+          JSONObject a = arr.getJSONObject(i);
+          if (!IpUtil.isValidIpv4(a.optString("ip", ""))) {
+            a.put("ip", IpUtil.randomIp());
+            changed = true;
+          }
+        }
+        if (changed) prefs.edit().putString("accounts", arr.toString()).apply();
+        return arr.toString();
+      } catch (Exception e) {
+        return "[]";
+      }
     }
 
     /** 打开全屏实时扫码界面。 */
@@ -241,7 +228,7 @@ public class MainActivity extends Activity {
         acc.put("token", token);
         acc.put("name", name);
         acc.put("school", school);
-        acc.put("ip", isValidIpv4(keptIp) ? keptIp : randomIp());
+        acc.put("ip", IpUtil.ensureValid(keptIp));
         next.put(acc);
         prefs.edit().putString("accounts", next.toString()).apply();
 
@@ -304,7 +291,7 @@ public class MainActivity extends Activity {
       SharedPreferences.Editor ed = prefs.edit().putString("ipMode", mode);
       if (MODE_SAME.equals(mode)) {
         String shared = prefs.getString("sharedIp", "");
-        if (!isValidIpv4(shared)) ed.putString("sharedIp", randomIp());
+        if (!IpUtil.isValidIpv4(shared)) ed.putString("sharedIp", IpUtil.randomIp());
       }
       ed.apply();
       return "{\"ok\":true}";
@@ -316,11 +303,11 @@ public class MainActivity extends Activity {
       try {
         JSONArray arr = new JSONArray(prefs.getString("accounts", "[]"));
         for (int i = 0; i < arr.length(); i++) {
-          arr.getJSONObject(i).put("ip", randomIp());
+          arr.getJSONObject(i).put("ip", IpUtil.randomIp());
         }
         prefs.edit()
             .putString("accounts", arr.toString())
-            .putString("sharedIp", randomIp())
+            .putString("sharedIp", IpUtil.randomIp())
             .apply();
         return "{\"ok\":true}";
       } catch (Exception e) {
@@ -442,7 +429,10 @@ public class MainActivity extends Activity {
       conn.setRequestProperty("Sec-Fetch-Site", "same-site");
       conn.setRequestProperty("Sec-Fetch-Mode", "cors");
       conn.setRequestProperty("Sec-Fetch-Dest", "empty");
-      if (ip != null && isValidIpv4(ip)) conn.setRequestProperty("X-Forwarded-For", ip);
+      // ip == null 表示「这次故意不伪造」（真实 IP 模式）；
+      // 非 null 时宁可重新生成一个合法 IP，也绝不静默地不发这个头 ——
+      // 不发的话服务端会记录手机真实 IP，还会让所有账号看起来一模一样。
+      if (ip != null) conn.setRequestProperty("X-Forwarded-For", IpUtil.ensureValid(ip));
       if (token != null) conn.setRequestProperty("token", token);
 
       byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
