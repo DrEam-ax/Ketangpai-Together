@@ -208,3 +208,24 @@ iframe 宽度 = 360   横向溢出 = 0 px   5行总高 = 291 px
 
 （这套工具是被真实 bug 逼出来的：账号卡片曾经因为文字换行被撑到 100+ px，
 4 个人就占满一屏 —— 那次如果先量一下就不会发出去。）
+
+## 十一、状态栏遮挡（Android 15 强制边到边）
+
+`targetSdk 35` 起，**Android 15 强制 App 边到边显示** —— 内容会画到状态栏和导航栏底下。
+表现就是主界面顶栏「课堂派签到」被状态栏图标压住。
+
+处理方式（`MainActivity.applyEdgeToEdge()`）：
+
+1. 显式声明铺满整屏：API 30+ 用 `setDecorFitsSystemWindows(false)`；
+   更老的系统用 `SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | LAYOUT_HIDE_NAVIGATION`
+   —— 两边都显式声明，行为才一致，也避免在已经自动避让的系统上**重复加内边距**。
+2. 把状态栏/导航栏设为透明，并清掉 `APPEARANCE_LIGHT_*`（深色背景要浅色图标）。
+3. 用 `setOnApplyWindowInsetsListener` 把系统栏的实际高度作为 **padding 加到 WebView** 上。
+4. `web.setBackgroundColor(0xFF0F1116)` —— 否则 padding 那块会露出 WebView 默认的白底。
+
+> 注意：**不要指望 CSS 的 `env(safe-area-inset-top)`**。Android WebView 里那个值反映的是
+> **刘海/挖孔屏的 cutout**，不是状态栏高度 —— 在没刘海的手机上它会是 0，照样被压。
+> 内边距必须在原生侧加。
+
+> 这一条**没在真机上验证过**（本机没跑模拟器）。装上去如果顶栏还是有重叠，
+> 大概率是某些系统上报的 inset 为 0，那时我改成读 `WindowMetrics` 或直接固定一个状态栏高度兜底。

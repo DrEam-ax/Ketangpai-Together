@@ -3,9 +3,15 @@ package com.ktp.scanner;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.View;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -51,6 +57,8 @@ public class MainActivity extends Activity {
       "Mozilla/5.0 (iPhone; CPU iPhone OS 18_3_1 like Mac OS X) AppleWebKit/605.1.15 "
           + "(KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.56(0x18003835) NetType/WIFI Language/zh_CN";
   private static final int REQ_SCAN = 1001;
+  /** 与 style.css 里的 --bg 保持一致，用于状态栏/导航栏区域 */
+  private static final int PAGE_BG = 0xFF0F1116;
 
   /** IP 策略 */
   private static final String MODE_PER_ACCOUNT = "perAccount"; // 每账号固定一个假 IP（默认）
@@ -73,10 +81,80 @@ public class MainActivity extends Activity {
     s.setLoadWithOverviewMode(true);
     s.setUseWideViewPort(true);
 
+    // 页面背景是深色；WebView 自身也要同色，否则状态栏那块内边距会露出白底
+    web.setBackgroundColor(PAGE_BG);
+
     web.setWebViewClient(new WebViewClient());
     web.addJavascriptInterface(new Bridge(), "Android");
     web.loadUrl("file:///android_asset/www/index.html");
     setContentView(web);
+
+    applyEdgeToEdge();
+  }
+
+  /**
+   * 处理系统栏。
+   *
+   * 为什么要手动做：targetSdk 35 (Android 15) 起，**边到边显示是强制的** ——
+   * 内容会画到状态栏/导航栏底下。之前顶栏文字被状态栏图标压住就是这个原因。
+   *
+   * 做法：显式声明「铺满整屏」，然后把系统栏的实际高度作为 padding 加到 WebView 上。
+   * 老系统（API < 30）用 SYSTEM_UI_FLAG_LAYOUT_* 达到同样效果，
+   * 这样两边行为一致，也避免在已经自动避让的系统上重复加内边距。
+   */
+  private void applyEdgeToEdge() {
+    Window window = getWindow();
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      window.setDecorFitsSystemWindows(false);
+      window.setStatusBarColor(Color.TRANSPARENT);
+      window.setNavigationBarColor(Color.TRANSPARENT);
+      WindowInsetsController c = window.getInsetsController();
+      if (c != null) {
+        // 深色背景 → 要浅色图标，所以把 LIGHT_*（深色图标）两个标志位清掉
+        c.setSystemBarsAppearance(
+            0,
+            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+      }
+    } else {
+      window.setStatusBarColor(Color.TRANSPARENT);
+      window.setNavigationBarColor(Color.TRANSPARENT);
+      window
+          .getDecorView()
+          .setSystemUiVisibility(
+              View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                  | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                  | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+    }
+
+    web.setOnApplyWindowInsetsListener(
+        new View.OnApplyWindowInsetsListener() {
+          @Override
+          public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
+            int left;
+            int top;
+            int right;
+            int bottom;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+              android.graphics.Insets bars =
+                  insets.getInsets(
+                      WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+              left = bars.left;
+              top = bars.top;
+              right = bars.right;
+              bottom = bars.bottom;
+            } else {
+              left = insets.getSystemWindowInsetLeft();
+              top = insets.getSystemWindowInsetTop();
+              right = insets.getSystemWindowInsetRight();
+              bottom = insets.getSystemWindowInsetBottom();
+            }
+            v.setPadding(left, top, right, bottom);
+            return insets;
+          }
+        });
+    web.requestApplyInsets();
   }
 
   @Override
