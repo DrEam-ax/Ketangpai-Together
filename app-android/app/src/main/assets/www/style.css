@@ -236,6 +236,12 @@ button.ghost {
   gap: 8px;
   margin-top: 10px;
 }
+/* 两个按钮并排等宽 */
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
 input,
 select,
 textarea {

@@ -60,6 +60,32 @@
         </details>
       </div>
 
+      <!-- ===== 成员迁移 ===== -->
+      <div class="card">
+        <details id="migratebox">
+          <summary>成员迁移（换手机用）</summary>
+          <div class="stack">
+            <div class="dim small">
+              导出成一段文本 → 复制或分享到新手机 → 在新手机上「从剪贴板导入」。
+            </div>
+
+            <label class="chk"><input type="checkbox" id="exp-secrets" checked />包含密码（不勾选则导入后要重填）</label>
+            <div class="row2">
+              <button id="exp-copy">导出并复制</button>
+              <button id="exp-share" class="ghost">分享</button>
+            </div>
+
+            <label class="chk"><input type="checkbox" id="imp-replace" />覆盖现有成员（不勾选则按备注名合并）</label>
+            <button id="imp-clip" class="ghost">从剪贴板导入</button>
+
+            <textarea id="exp-out" rows="3" placeholder="导出结果会出现在这里；也可以把别人发你的内容粘进来"></textarea>
+            <button id="imp-text" class="ghost">从上面文本框导入</button>
+
+            <p class="tip" id="migrate-hint"></p>
+          </div>
+        </details>
+      </div>
+
       <!-- ===== 日志 ===== -->
       <div class="card">
         <div class="head">

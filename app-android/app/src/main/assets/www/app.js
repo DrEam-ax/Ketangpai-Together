@@ -324,6 +324,98 @@ $("#add").addEventListener("click", () => {
   }
 });
 
+// ---------------------------------------------------------------- 成员迁移
+
+function setMigrateHint(text) {
+  const el = $("#migrate-hint");
+  if (el) el.textContent = text;
+}
+
+/** 生成导出串（不复制）。分享前也会用到。 */
+function buildExport() {
+  const withSecrets = $("#exp-secrets").checked;
+  const r = JSON.parse(native.exportAccounts(withSecrets));
+  if (!r.ok) {
+    log(`导出失败：${r.error}`, "er");
+    setMigrateHint(`导出失败：${r.error}`);
+    return null;
+  }
+  $("#exp-out").value = r.payload;
+  return r;
+}
+
+function doExportCopy() {
+  const r = buildExport();
+  if (!r) return;
+  const c = JSON.parse(native.copyToClipboard(r.payload));
+  if (c.ok) {
+    setMigrateHint(
+      `已导出 ${r.count} 个成员并复制到剪贴板${r.withSecrets ? "（含密码，别外传）" : "（不含密码）"}`,
+    );
+    log(`已导出 ${r.count} 个成员到剪贴板`, "ok");
+  } else {
+    setMigrateHint(`已生成但复制失败：${c.error} —— 可以长按下面文本框手动复制`);
+    log(`复制到剪贴板失败：${c.error}`, "wa");
+  }
+}
+
+function doExportShare() {
+  const r = buildExport();
+  if (!r) return;
+  const s = JSON.parse(native.shareText(r.payload));
+  if (s.ok) {
+    setMigrateHint(`已调起分享（${r.count} 个成员）`);
+    log(`已调起系统分享`, "ok");
+  } else {
+    setMigrateHint(`分享失败：${s.error}`);
+  }
+}
+
+function doImport(payload, from) {
+  if (!payload || !payload.trim()) {
+    log("没有可导入的内容", "wa");
+    setMigrateHint("没有可导入的内容");
+    return;
+  }
+  const replace = $("#imp-replace").checked;
+  const r = JSON.parse(native.importAccounts(payload, replace));
+  if (!r.ok) {
+    log(`导入失败：${r.error}`, "er");
+    setMigrateHint(`导入失败：${r.error}`);
+    return;
+  }
+  setMigrateHint(
+    `从${from}导入完成：新增 ${r.added}、更新 ${r.updated}，当前共 ${r.total} 个成员` +
+      (r.withSecrets ? "" : "（这份数据不含密码，需要重新填）"),
+  );
+  log(`导入完成：新增 ${r.added}、更新 ${r.updated}，共 ${r.total}`, "ok");
+  // 导入后让新成员默认全选
+  state.selectionReady = false;
+  state.keys.clear();
+  loadSettings();
+  loadAccounts();
+}
+
+function doImportClipboard() {
+  const c = JSON.parse(native.readClipboard());
+  if (!c.ok) {
+    log(`读剪贴板失败：${c.error}`, "er");
+    setMigrateHint(`读剪贴板失败：${c.error}`);
+    return;
+  }
+  if (!c.text || !c.text.trim()) {
+    log("剪贴板是空的", "wa");
+    setMigrateHint("剪贴板是空的 —— 先在上面「导出并复制」，或先在旧手机上复制好");
+    return;
+  }
+  doImport(c.text, "剪贴板");
+}
+
+$("#exp-copy").addEventListener("click", doExportCopy);
+$("#exp-share").addEventListener("click", doExportShare);
+$("#imp-clip").addEventListener("click", doImportClipboard);
+$("#imp-text").addEventListener("click", () => doImport($("#exp-out").value, "文本框"));
+
 // ---------------------------------------------------------------- 启动
 
 (function main() {

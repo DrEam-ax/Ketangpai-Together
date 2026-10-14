@@ -1,6 +1,9 @@
 package com.ktp.scanner;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -8,6 +11,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -377,6 +381,193 @@ public class MainActivity extends Activity {
       }
     }
 
+    // ---------------------------------------------------------- 成员导入导出
+
+    /**
+     * 导出全部账号为一个可复制的字符串。
+     *
+     * 编码方式是 JSON -> URL-safe Base64，前面加 "KTP1:" 前缀，
+     * 好处：单行、换行和空格都不会破坏它，方便走微信/剪贴板。
+     *
+     * @param withSecrets 是否包含密码和 token（完整迁移用；不含则导入后要重新填密码）
+     */
+    @JavascriptInterface
+    public String exportAccounts(boolean withSecrets) {
+      JSONObject out = new JSONObject();
+      try {
+        JSONArray arr = new JSONArray(prefs.getString("accounts", "[]"));
+        JSONArray list = new JSONArray();
+        for (int i = 0; i < arr.length(); i++) {
+          JSONObject a = arr.getJSONObject(i);
+          JSONObject row = new JSONObject();
+          row.put("key", a.optString("key"));
+          row.put("email", a.optString("email"));
+          row.put("name", a.optString("name", ""));
+          row.put("school", a.optString("school", ""));
+          row.put("ip", a.optString("ip", ""));
+          if (withSecrets) {
+            row.put("password", a.optString("password", ""));
+            row.put("token", a.optString("token", ""));
+          }
+          list.put(row);
+        }
+        JSONObject payload = new JSONObject();
+        payload.put("v", 1);
+        payload.put("app", "ktp");
+        payload.put("ts", System.currentTimeMillis() / 1000);
+        payload.put("withSecrets", withSecrets);
+        payload.put("accounts", list);
+
+        String code =
+            Base64.encodeToString(
+                payload.toString().getBytes(StandardCharsets.UTF_8),
+                Base64.URL_SAFE | Base64.NO_WRAP);
+        out.put("ok", true);
+        out.put("count", list.length());
+        out.put("payload", "KTP1:" + code);
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+      return out.toString();
+    }
+
+    /**
+     * 导入账号。accepts 原始 JSON 或 "KTP1:" 开头的那串 Base64。
+     *
+     * @param replace true=覆盖（清空现有账号），false=合并（同 key 覆盖，其余保留）
+     */
+    @JavascriptInterface
+    public String importAccounts(String payload, boolean replace) {
+      JSONObject out = new JSONObject();
+      try {
+        String raw = payload == null ? "" : payload.trim();
+        if (raw.isEmpty()) throw new Exception("内容是空的");
+
+        String json;
+        if (raw.startsWith("{")) {
+          // 直接是 JSON：**不要**去空白，名字/密码/学校名里可能本来就有空格
+          json = raw;
+        } else {
+          // Base64：可以放心去掉换行和空格（复制过来常带换行）
+          String text = raw.replaceAll("\\s+", "");
+          if (text.startsWith("KTP1:")) text = text.substring(5);
+          else if (text.startsWith("KTP1")) text = text.substring(4);
+          byte[] bytes;
+          try {
+            bytes = Base64.decode(text, Base64.URL_SAFE | Base64.NO_WRAP);
+          } catch (Exception e) {
+            bytes = Base64.decode(text, Base64.DEFAULT);
+          }
+          json = new String(bytes, StandardCharsets.UTF_8);
+        }
+
+        JSONObject obj = new JSONObject(json);
+        if (!"ktp".equals(obj.optString("app"))) {
+          throw new Exception("这不是本 App 导出的成员数据");
+        }
+        JSONArray incoming = obj.optJSONArray("accounts");
+        if (incoming == null) throw new Exception("数据里没有账号列表");
+
+        JSONArray cur =
+            replace ? new JSONArray() : new JSONArray(prefs.getString("accounts", "[]"));
+        int added = 0;
+        int updated = 0;
+        for (int i = 0; i < incoming.length(); i++) {
+          JSONObject in = incoming.getJSONObject(i);
+          String key = in.optString("key", "");
+          if (key.isEmpty()) continue;
+          JSONObject acc = new JSONObject();
+          acc.put("key", key);
+          acc.put("email", in.optString("email", ""));
+          acc.put("password", in.optString("password", ""));
+          acc.put("token", in.optString("token", ""));
+          acc.put("name", in.optString("name", key));
+          acc.put("school", in.optString("school", ""));
+          acc.put("ip", IpUtil.ensureValid(in.optString("ip", "")));
+
+          int found = -1;
+          for (int j = 0; j < cur.length(); j++) {
+            if (key.equals(cur.getJSONObject(j).optString("key"))) {
+              found = j;
+              break;
+            }
+          }
+          if (found >= 0) {
+            cur.put(found, acc);
+            updated++;
+          } else {
+            cur.put(acc);
+            added++;
+          }
+        }
+        prefs.edit().putString("accounts", cur.toString()).apply();
+
+        out.put("ok", true);
+        out.put("added", added);
+        out.put("updated", updated);
+        out.put("total", cur.length());
+        out.put("withSecrets", obj.optBoolean("withSecrets", false));
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+      return out.toString();
+    }
+
+    @JavascriptInterface
+    public String copyToClipboard(String text) {
+      try {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm == null) throw new Exception("剪贴板不可用");
+        cm.setPrimaryClip(ClipData.newPlainText("ktp-members", text));
+        return "{\"ok\":true}";
+      } catch (Exception e) {
+        return "{\"ok\":false,\"error\":" + JSONObject.quote(String.valueOf(e.getMessage())) + "}";
+      }
+    }
+
+    /** 读剪贴板。Android 10+ 只在 App 处于前台时允许读，正好符合我们的用法。 */
+    @JavascriptInterface
+    public String readClipboard() {
+      JSONObject out = new JSONObject();
+      try {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        String text = "";
+        if (cm != null && cm.getPrimaryClip() != null && cm.getPrimaryClip().getItemCount() > 0) {
+          // 注意用 MainActivity.this：这里在内部类 Bridge 里，直接写 this 是 Bridge 实例，类型不对
+          CharSequence cs = cm.getPrimaryClip().getItemAt(0).coerceToText(MainActivity.this);
+          if (cs != null) text = cs.toString();
+        }
+        out.put("ok", true);
+        out.put("text", text);
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+      return out.toString();
+    }
+
+    /** 调起系统分享（微信/文件等），方便直接发到另一台手机。 */
+    @JavascriptInterface
+    public String shareText(final String text) {
+      try {
+        new Handler(Looper.getMainLooper())
+            .post(
+                new Runnable() {
+                  @Override
+                  public void run() {
+                    Intent send = new Intent(Intent.ACTION_SEND);
+                    send.setType("text/plain");
+                    send.putExtra(Intent.EXTRA_TEXT, text);
+                    Intent chooser = Intent.createChooser(send, "分享成员数据");
+                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(chooser);
+                  }
+                });
+        return "{\"ok\":true}";
+      } catch (Exception e) {
+        return "{\"ok\":false,\"error\":" + JSONObject.quote(String.valueOf(e.getMessage())) + "}";
+      }
+    }
+
     /** 读 IP 策略 + 每个账号的假 IP（界面上展示用）。 */
     @JavascriptInterface
     public String getSettings() {
@@ -505,6 +696,18 @@ public class MainActivity extends Activity {
 
   private static String strip(String s) {
     return s == null ? "" : s.replaceAll("<br\\s*/?>", " ");
+  }
+
+  /**
+   * 拼一个错误返回串。
+   *
+   * 不用 JSONObject.put —— 它声明抛 JSONException，写在 catch 块里还得再套一层 try，
+   * 很容易漏（这里就漏了三个方法，编译才发现）。手写转义更省事。
+   */
+  private static String errJson(String message) {
+    String s = message == null ? "" : message;
+    s = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", "");
+    return "{\"ok\":false,\"error\":\"" + s + "\"}";
   }
 
   /** token 失效时自动重新登录一次。 */

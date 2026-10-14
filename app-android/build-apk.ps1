@@ -27,18 +27,24 @@ if (-not (Test-Path "$env:ANDROID_HOME\platforms")) {
   exit 2
 }
 
+$apk = Join-Path $root 'app\build\outputs\apk\debug\app-debug.apk'
+
+# 关键：先删掉上次的产物。
+# 否则构建失败时旧 apk 还在，脚本会把它当成本次成功产物报出来 —— 真的踩过，
+# 结果把一个其实是上一版的包当新版发出去过。
+if (Test-Path $apk) { Remove-Item $apk -Force }
+
 Push-Location $root
 & "$root\gradlew.bat" assembleDebug --console=plain
 $code = $LASTEXITCODE
 Pop-Location
 
-$apk = Join-Path $root 'app\build\outputs\apk\debug\app-debug.apk'
 Write-Host ''
-if (Test-Path $apk) {
+if ($code -eq 0 -and (Test-Path $apk)) {
   $f = Get-Item $apk
   Write-Host ('[成功] {0}' -f $f.FullName) -ForegroundColor Green
   Write-Host ('       大小 {0:N1} MB   时间 {1}' -f ($f.Length / 1MB), $f.LastWriteTime)
   exit 0
 }
-Write-Host ("[失败] 退出码 {0}，未找到 apk" -f $code) -ForegroundColor Red
+Write-Host ("[失败] gradle 退出码 {0}，未产出 apk（不会误用旧包）" -f $code) -ForegroundColor Red
 exit 7
