@@ -2,6 +2,7 @@ package com.ktp.scanner;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -22,6 +23,8 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsResult;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -100,6 +103,37 @@ public class MainActivity extends Activity {
     s.setUseWideViewPort(true);
     web.setBackgroundColor(PAGE_BG);
     web.setWebViewClient(new WebViewClient());
+
+    // WebChromeClient 必须设，否则页面里的 alert/confirm **既不弹框也不生效**：
+    // 没实现 onJsConfirm 时 confirm() 直接返回 false ——
+    // （踩过：位置/成员的 × 删除按钮「点了没反应」，就是卡在这一句 confirm 上。）
+    web.setWebChromeClient(
+        new WebChromeClient() {
+          @Override
+          public boolean onJsAlert(
+              WebView view, String url, String message, final JsResult result) {
+            new AlertDialog.Builder(MainActivity.this)
+                .setMessage(message)
+                .setPositiveButton("知道了", (d, w) -> result.confirm())
+                .setOnCancelListener(d -> result.cancel())
+                .show();
+            return true;
+          }
+
+          @Override
+          public boolean onJsConfirm(
+              WebView view, String url, String message, final JsResult result) {
+            new AlertDialog.Builder(MainActivity.this)
+                .setTitle("确认")
+                .setMessage(message)
+                .setPositiveButton("确定", (d, w) -> result.confirm())
+                .setNegativeButton("取消", (d, w) -> result.cancel())
+                .setOnCancelListener(d -> result.cancel())
+                .show();
+            return true;
+          }
+        });
+
     web.addJavascriptInterface(new Bridge(), "Android");
     web.loadUrl("file:///android_asset/www/index.html");
 

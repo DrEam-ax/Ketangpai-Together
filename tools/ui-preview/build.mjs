@@ -84,6 +84,23 @@ const MOCK = `
       ],
     }),
   };
+
+  // 记录所有 bridge 调用 —— 用来验证"点某个按钮到底有没有调到原生方法"，
+  // 这比肉眼看界面可靠（比如 × 删除点了没反应，到底是没调、还是原生那边没删掉）。
+  window.__calls = [];
+  const raw = window.Android;
+  window.Android = {};
+  for (const k of Object.keys(raw)) {
+    window.Android[k] = function () {
+      window.__calls.push(k + "(" + Array.prototype.join.call(arguments, ",") + ")");
+      return raw[k].apply(null, arguments);
+    };
+  }
+  // 预览里 confirm 一律返回 true（真机上这是 WebChromeClient 的事，见 MainActivity）
+  window.confirm = function (m) {
+    window.__calls.push("confirm(" + m + ")");
+    return true;
+  };
 <\/script>
 `;
 
@@ -136,6 +153,9 @@ const DIAG = `
     pre.style.cssText = "position:fixed;left:-9999px;top:0";
     document.body.appendChild(pre);
 
+    // ==== 交互验证：hash 为 #deltest 时模拟点「位置 ×」「切换生效位置」「成员 ×」，
+    //      再把这些 bridge 调用一起上报 —— 用来证明按钮确实调到了原生方法。
+
     // 用图片信标把数据发到本地诊断服务（不依赖 chrome 的 stdout）
     new Image().src = "http://127.0.0.1:8899/diag?d=" + encodeURIComponent(JSON.stringify(out));
   })();
@@ -159,8 +179,14 @@ const FRAME = `<!doctype html>
 <html><head><meta charset="utf-8"><title>layout check</title>
 <style>html,body{margin:0;background:#222}iframe{width:360px;height:820px;border:0;display:block}</style>
 </head><body>
-<iframe id="f" src="index.html"></iframe>
+<iframe id="f"></iframe>
 <script>
+  // 把外层的 hash 传给 iframe 的 src —— DIAG 脚本在 iframe 内部跑，
+  // 它读的是 iframe 自己的 location.hash，拿不到外层的。
+  (function () {
+    var f = document.getElementById("f");
+    f.src = "index.html" + (window.location.hash || "");
+  })();
   document.getElementById("f").addEventListener("load", function () {
     var d = document.getElementById("f").contentDocument;
     var w = document.getElementById("f").contentWindow;
@@ -187,6 +213,29 @@ const FRAME = `<!doctype html>
         };
       })
     };
+
+    // ==== 交互验证（#deltest）：真的去点那些按钮，再看 bridge 调用记录。
+    //      比肉眼看界面可靠 —— 能区分"按钮没绑上事件"和"绑上了但原生没删掉"。
+    if (window.location.hash === "#deltest") {
+      var tg = d.querySelector('#tabbar .tab[data-tab="gps"]');
+      if (tg) tg.click();
+      var lb = d.getElementById("locbox");
+      if (lb) lb.open = true;
+      var delLoc = d.querySelectorAll("#locations button[data-del]");
+      out.delButtons = delLoc.length;
+      if (delLoc.length) delLoc[0].click();
+      var useLoc = d.querySelectorAll("#locations input[data-use]");
+      if (useLoc.length > 1) {
+        useLoc[1].checked = true;
+        useLoc[1].dispatchEvent(new Event("change"));
+      }
+      var ts = d.querySelector('#tabbar .tab[data-tab="settings"]');
+      if (ts) ts.click();
+      var delAcc = d.querySelectorAll("#accounts button[data-x]");
+      if (delAcc.length) delAcc[0].click();
+      out.calls = w.__calls || [];
+    }
+
     new Image().src = "http://127.0.0.1:8899/diag?d=" + encodeURIComponent(JSON.stringify(out));
 
     // 看哪一栏 / 哪张卡：frame.html#scan / #gps / #settings / #location / #monitor
