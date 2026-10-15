@@ -255,10 +255,6 @@ button.ghost {
   font-weight: 700;
   border-radius: 12px;
 }
-.big::before {
-  content: "📷";
-  margin-right: 8px;
-}
 
 /* ---------------- 表单 ---------------- */
 
@@ -292,6 +288,12 @@ summary {
   cursor: pointer;
   color: var(--dim);
   font-size: 13.5px;
+}
+/* 折叠状态下也能一眼看到监控在不在跑 */
+.mon-badge {
+  float: right;
+  font-size: 12px;
+  color: var(--ok);
 }
 
 /* ---------------- 结果 ---------------- */

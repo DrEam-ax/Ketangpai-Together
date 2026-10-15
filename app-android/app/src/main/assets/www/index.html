@@ -31,36 +31,35 @@
 
       <!-- ===== 签到提醒 ===== -->
       <div class="card">
-        <div class="head">
-          <span class="ttl">签到提醒</span>
-          <span class="count" id="mon-badge"></span>
-        </div>
-        <div class="stack">
-          <div class="dim small">选一个人当「主成员」，他/她的课一旦有人在签到，手机就弹通知。</div>
-          <select id="primary"></select>
-          <div class="row2">
-            <button id="mon-start">开始监控</button>
-            <button id="mon-stop" class="ghost">停止</button>
-          </div>
-          <div class="dim small">检查频率（一次要问 28 门课，越短越费流量）</div>
-          <select id="poll">
-            <option value="5">5 秒（最快）</option>
-            <option value="10">10 秒（推荐）</option>
-            <option value="20">20 秒</option>
-            <option value="30">30 秒（省流量）</option>
-            <option value="60">60 秒</option>
-          </select>
-          <div class="tip pre" id="mon-status"></div>
-          <div class="note">
-            <b>⚠️ 还要在手机设置里放行，否则可能收不到提醒</b>
-            <span class="pre">设置 → 应用管理 →「课堂派签到」：
+        <details id="monbox">
+          <summary>签到提醒<span class="mon-badge" id="mon-badge"></span></summary>
+          <div class="stack">
+            <div class="dim small">选一个人当「主成员」，他/她的课一旦有人在签到，手机就弹通知。</div>
+            <select id="primary"></select>
+            <div class="row2">
+              <button id="mon-start">开始监控</button>
+              <button id="mon-stop" class="ghost">停止</button>
+            </div>
+            <div class="dim small">检查频率（每轮都要逐门课问一遍，越短越费流量）</div>
+            <select id="poll">
+              <option value="5">5 秒（最快）</option>
+              <option value="10">10 秒（推荐）</option>
+              <option value="20">20 秒</option>
+              <option value="30">30 秒（省流量）</option>
+              <option value="60">60 秒</option>
+            </select>
+            <div class="tip pre" id="mon-status"></div>
+            <div class="note">
+              <b>⚠️ 还要在手机设置里放行，否则可能收不到提醒</b>
+              <span class="pre">设置 → 应用管理 →「课堂派签到」：
 · 自启动 / 允许后台运行 → 打开
 · 电池 → 不限制后台行为（关掉省电优化）
 · 通知 → 允许</span>
-            <span class="dim">各家 ROM 叫法不同，小米叫「自启动」+「省电策略：无限制」，
+              <span class="dim">各家 ROM 叫法不同，小米叫「自启动」+「省电策略：无限制」，
 华为叫「应用启动管理：手动管理」，OPPO/vivo 叫「允许后台运行」。</span>
+            </div>
           </div>
-        </div>
+        </details>
       </div>
 
       <!-- ===== 添加账号 ===== -->
