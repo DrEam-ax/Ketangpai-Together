@@ -1,11 +1,13 @@
 package com.ktp.scanner;
 
+import android.content.SharedPreferences;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -99,5 +101,70 @@ final class KtpApi {
     int n;
     while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
     return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+  }
+
+  // ------------------------------------------------------------------ 账号
+
+  /**
+   * 按备注名找账号。
+   * 放在这里是为了让监控服务、定位签到共用同一套取号逻辑，避免两处实现走偏。
+   */
+  static JSONObject findAccount(SharedPreferences prefs, String key) {
+    if (key == null || key.isEmpty()) return null;
+    try {
+      JSONArray arr = new JSONArray(prefs.getString("accounts", "[]"));
+      for (int i = 0; i < arr.length(); i++) {
+        JSONObject o = arr.getJSONObject(i);
+        if (key.equals(o.optString("key"))) return o;
+      }
+    } catch (Exception ignored) {
+    }
+    return null;
+  }
+
+  /** 主成员（签到提醒盯的那个人）。 */
+  static JSONObject primaryAccount(SharedPreferences prefs) {
+    return findAccount(prefs, prefs.getString("primaryKey", ""));
+  }
+
+  /** 给这次请求挑一个 IP；返回 null 表示不伪造（真实 IP 模式）。 */
+  static String ipForAccount(SharedPreferences prefs, JSONObject acc) {
+    String mode = prefs.getString("ipMode", "perAccount");
+    if ("real".equals(mode)) return null;
+    if ("same".equals(mode)) {
+      String shared = prefs.getString("sharedIp", "");
+      if (shared == null || !IpUtil.isValidIpv4(shared)) {
+        shared = IpUtil.randomIp();
+        prefs.edit().putString("sharedIp", shared).apply();
+      }
+      return shared;
+    }
+    String ip = acc == null ? null : acc.optString("ip", "");
+    return IpUtil.ensureValid(ip);
+  }
+
+  static void saveToken(SharedPreferences prefs, String key, String token) {
+    if (key == null || key.isEmpty() || token == null) return;
+    try {
+      JSONArray arr = new JSONArray(prefs.getString("accounts", "[]"));
+      for (int i = 0; i < arr.length(); i++) {
+        JSONObject o = arr.getJSONObject(i);
+        if (key.equals(o.optString("key"))) {
+          o.put("token", token);
+          break;
+        }
+      }
+      prefs.edit().putString("accounts", arr.toString()).apply();
+    } catch (Exception ignored) {
+    }
+  }
+
+  /** 拿 token；没有就登录一次并把新 token 写回账号。 */
+  static String ensureToken(SharedPreferences prefs, JSONObject acc, String ip) throws Exception {
+    String token = acc.optString("token", "");
+    if (token != null && !token.isEmpty()) return token;
+    token = login(acc.optString("email"), acc.optString("password"), ip);
+    saveToken(prefs, acc.optString("key"), token);
+    return token;
   }
 }

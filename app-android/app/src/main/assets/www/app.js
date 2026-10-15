@@ -192,7 +192,82 @@ function loadMonitor() {
   } else {
     badge.textContent = "";
   }
+
+  // 教室坐标（用户正在输入时不要覆盖他）
+  const lat = $("#room-lat");
+  const lng = $("#room-lng");
+  if (document.activeElement !== lat && !lat.value) lat.value = r.roomLat || "";
+  if (document.activeElement !== lng && !lng.value) lng.value = r.roomLng || "";
+
+  renderPending(r.pending || []);
 }
+
+const KIND = { 1: "数字码签到", 2: "定位签到", 3: "扫码签到", 4: "签到签出" };
+
+/**
+ * 正在进行的签到列表。
+ *
+ * 定位签到（type=2）可以一键提交 —— 坐标只是请求参数，不需要人真的在教室。
+ * 数字码/扫码需要额外信息（老师念的码 / 现场二维码），所以只显示、不给按钮。
+ */
+function renderPending(list) {
+  const box = $("#pending");
+  const sig = list.map((x) => x.id).join(",");
+  if (box.dataset.sig === sig) return; // 列表没变就不重绘，免得按钮点到一半被重建
+  box.dataset.sig = sig;
+  box.innerHTML = "";
+  for (const it of list) {
+    const el = document.createElement("div");
+    el.className = "pend";
+    const kind = KIND[it.type] || "签到";
+    el.innerHTML =
+      `<span class="who2">${esc(it.course)}<br /><span class="kind">${esc(kind)}${
+        it.title ? " · " + esc(it.title) : ""
+      }</span></span>` +
+      (it.type === "2" ? `<button class="mini" data-sign="${esc(it.id)}">立即签到</button>` : "");
+    box.appendChild(el);
+  }
+  box.querySelectorAll("button[data-sign]").forEach((b) =>
+    b.addEventListener("click", () => {
+      b.disabled = true;
+      b.textContent = "提交中…";
+      const r = JSON.parse(native.signLocationNow(b.dataset.sign));
+      if (r.ok) {
+        b.textContent = "已签到 ✓";
+        log(`定位签到成功：报的坐标 ${r.lat}, ${r.lng}`, "ok");
+      } else {
+        b.disabled = false;
+        b.textContent = "立即签到";
+        log(`定位签到失败：${r.message}`, "er");
+      }
+    }),
+  );
+}
+
+$("#room-save").addEventListener("click", () => {
+  const lat = $("#room-lat").value.trim();
+  const lng = $("#room-lng").value.trim();
+  if (!lat || !lng) {
+    log("经纬度都要填", "wa");
+    return;
+  }
+  const r = JSON.parse(native.setRoomLocation(lat, lng));
+  if (r.ok) log(`教室坐标已保存：${lat}, ${lng}`, "ok");
+  else log(`保存失败：${r.error}`, "er");
+  loadMonitor();
+});
+
+$("#room-here").addEventListener("click", () => {
+  const r = JSON.parse(native.readCurrentLocation());
+  if (!r.ok) {
+    log(r.error || "读不到当前位置", "wa");
+    return;
+  }
+  $("#room-lat").value = r.lat;
+  $("#room-lng").value = r.lng;
+  const age = r.ageSec > 60 ? `（${Math.round(r.ageSec / 60)} 分钟前的位置）` : "（刚刚）";
+  log(`读到当前位置 ${r.lat}, ${r.lng} ${age} —— 确认后点「保存坐标」`, "ok");
+});
 
 $("#primary").addEventListener("change", (e) => {
   native.setPrimary(e.target.value);

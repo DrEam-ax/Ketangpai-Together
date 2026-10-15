@@ -1,5 +1,6 @@
 package com.ktp.scanner;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -8,6 +9,9 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -34,6 +38,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 课堂派签到 —— 独立客户端。
@@ -64,6 +69,7 @@ public class MainActivity extends Activity {
           + "(KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.56(0x18003835) NetType/WIFI Language/zh_CN";
   private static final int REQ_SCAN = 1001;
   private static final int REQ_NOTIF = 1002;
+  private static final int REQ_LOCATION = 1003;
   private static final String NOTIFICATION_PERMISSION = "android.permission.POST_NOTIFICATIONS";
   /** 与 style.css 里的 --bg 保持一致，用于状态栏/导航栏区域 */
   private static final int PAGE_BG = 0xFF0F1116;
@@ -255,6 +261,14 @@ public class MainActivity extends Activity {
   private boolean notificationsAllowed() {
     if (Build.VERSION.SDK_INT < 33) return true;
     return checkSelfPermission(NOTIFICATION_PERMISSION) == PackageManager.PERMISSION_GRANTED;
+  }
+
+  /** 定位权限是否已给（只用来「读当前位置填教室坐标」，签到本身不需要）。 */
+  private boolean locationAllowed() {
+    return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED
+        || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED;
   }
 
   /** 给这次请求挑一个 IP；返回 null 表示不发送 X-Forwarded-For。 */
@@ -604,6 +618,10 @@ public class MainActivity extends Activity {
         out.put("lastCheckAt", MonitorService.lastCheckAt);
         out.put("notifGranted", notificationsAllowed());
         out.put("pollMs", prefs.getLong("pollIntervalMs", 10000L));
+        out.put("roomLat", prefs.getString(CheckinHelper.PREF_LAT, ""));
+        out.put("roomLng", prefs.getString(CheckinHelper.PREF_LNG, ""));
+        out.put("pending", new JSONArray(MonitorService.pendingJson));
+        out.put("locationGranted", locationAllowed());
       } catch (Exception e) {
         return errJson(String.valueOf(e.getMessage()));
       }
@@ -622,6 +640,104 @@ public class MainActivity extends Activity {
       long ms = Math.max(5, Math.min(120, seconds)) * 1000L;
       prefs.edit().putLong("pollIntervalMs", ms).apply();
       return "{\"ok\":true}";
+    }
+
+    // ---------------------------------------------------------- 定位签到
+
+    /**
+     * 保存教室坐标。定位签到报的就是这个 ——
+     * 坐标是请求体里的普通参数，不需要手机真的在教室（见 CheckinHelper 的说明）。
+     */
+    @JavascriptInterface
+    public String setRoomLocation(String lat, String lng) {
+      try {
+        double la = Double.parseDouble(lat.trim());
+        double ln = Double.parseDouble(lng.trim());
+        if (la < -90 || la > 90 || ln < -180 || ln > 180) {
+          return "{\"ok\":false,\"error\":\"坐标超出范围\"}";
+        }
+        prefs
+            .edit()
+            .putString(CheckinHelper.PREF_LAT, String.format(Locale.US, "%.6f", la))
+            .putString(CheckinHelper.PREF_LNG, String.format(Locale.US, "%.6f", ln))
+            .apply();
+        return "{\"ok\":true}";
+      } catch (Exception e) {
+        return errJson("坐标格式不对：" + e.getMessage());
+      }
+    }
+
+    /**
+     * 读手机当前位置 —— 用来「站在教室里点一下」把教室坐标填上。
+     *
+     * 优先用系统缓存的最后位置（同步、即时）；缓存为空就发一次单次定位请求，
+     * 让用户过两秒再点一次。这样不必为一个填表动作写一整套异步回调。
+     */
+    @JavascriptInterface
+    public String readCurrentLocation() {
+      JSONObject out = new JSONObject();
+      try {
+        if (!locationAllowed()) {
+          requestPermissions(
+              new String[] {
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+              },
+              REQ_LOCATION);
+          return "{\"ok\":false,\"error\":\"正在申请定位权限，同意后再点一次\"}";
+        }
+
+        LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (lm == null) return "{\"ok\":false,\"error\":\"定位服务不可用\"}";
+
+        Location best = null;
+        for (String p :
+            new String[] {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+          try {
+            Location l = lm.getLastKnownLocation(p);
+            if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+          } catch (Exception ignored) {
+          }
+        }
+
+        if (best == null) {
+          try {
+            lm.requestSingleUpdate(
+                LocationManager.NETWORK_PROVIDER,
+                new LocationListener() {
+                  @Override
+                  public void onLocationChanged(Location location) {}
+
+                  @Override
+                  public void onStatusChanged(String provider, int status, Bundle extras) {}
+
+                  @Override
+                  public void onProviderEnabled(String provider) {}
+
+                  @Override
+                  public void onProviderDisabled(String provider) {}
+                },
+                Looper.getMainLooper());
+          } catch (Exception ignored) {
+          }
+          return "{\"ok\":false,\"error\":\"系统还没缓存位置，等 2 秒再点一次；或照抄高德里显示的坐标\"}";
+        }
+
+        out.put("ok", true);
+        out.put("lat", String.format(Locale.US, "%.6f", best.getLatitude()));
+        out.put("lng", String.format(Locale.US, "%.6f", best.getLongitude()));
+        out.put("ageSec", (System.currentTimeMillis() - best.getTime()) / 1000);
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+      return out.toString();
+    }
+
+    /** 用已保存的教室坐标给某个定位签到提交（界面上的「立即签到」按钮）。 */
+    @JavascriptInterface
+    public String signLocationNow(String attenceId) {
+      // 注意 MainActivity.this：这里在内部类 Bridge 里，直接写 this 是 Bridge 实例
+      return CheckinHelper.signLocation(MainActivity.this, attenceId).toString();
     }
 
     @JavascriptInterface

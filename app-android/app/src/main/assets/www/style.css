@@ -269,6 +269,42 @@ button.ghost {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
+/* 两个输入框并排（教室经纬度） */
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+/* 待签到的课：左边课程名，右边一个「立即签到」按钮 */
+.pend {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  border: 1px solid rgba(255, 93, 93, 0.45);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.pend .who2 {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pend .kind {
+  color: var(--dim);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+button.mini {
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+}
 input,
 select,
 textarea {

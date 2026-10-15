@@ -40,6 +40,9 @@ public class MonitorService extends Service {
 
   static final String ACTION_START = "com.ktp.scanner.MONITOR_START";
   static final String ACTION_STOP = "com.ktp.scanner.MONITOR_STOP";
+  /** 通知上的「立即定位签到」按钮 */
+  static final String ACTION_SIGN = "com.ktp.scanner.MONITOR_SIGN";
+  static final String EXTRA_ATTENCE = "attenceid";
   static final String PREFS = "ktp";
   static final String CHANNEL_ALERT = "ktp_alert";
   static final String CHANNEL_MONITOR = "ktp_monitor";
@@ -62,6 +65,8 @@ public class MonitorService extends Service {
   static volatile long lastCheckAt = 0;
   /** 服务是否在跑（界面据此显示按钮状态） */
   static volatile boolean running = false;
+  /** 当前正在进行中的签到列表（JSON 数组字符串），界面据此显示「立即签到」按钮 */
+  static volatile String pendingJson = "[]";
 
   private HandlerThread thread;
   private Handler handler;
@@ -86,12 +91,33 @@ public class MonitorService extends Service {
       stopSelf();
       return START_NOT_STICKY;
     }
+    if (ACTION_SIGN.equals(action)) {
+      // 通知上的「立即定位签到」按钮。服务此刻一定在跑（通知就是它发的），
+      // 所以不需要再 startForeground。
+      final String attenceId = intent.getStringExtra(EXTRA_ATTENCE);
+      if (attenceId != null && !attenceId.isEmpty()) {
+        new Thread(
+                new Runnable() {
+                  @Override
+                  public void run() {
+                    JSONObject r = CheckinHelper.signLocation(MonitorService.this, attenceId);
+                    boolean ok = r.optBoolean("ok", false);
+                    lastStatus =
+                        (ok ? "定位签到成功（" : "定位签到失败：")
+                            + r.optString("message", "")
+                            + (ok ? "）" : "");
+                    updateMonitorNotification(lastStatus);
+                  }
+                })
+            .start();
+      }
+      return START_STICKY;
+    }
 
     startForeground(ID_MONITOR, buildMonitorNotification(null));
     running = true;
     lastStatus = "已启动，正在检查…";
     handler.removeCallbacksAndMessages(null);
-    final long interval = pollIntervalMs();
     handler.post(
         new Runnable() {
           @Override
@@ -223,17 +249,28 @@ public class MonitorService extends Service {
 
       lastCheckAt = System.currentTimeMillis();
       if (ongoing.isEmpty()) {
+        pendingJson = "[]";
         lastStatus = "正常 · " + n + " 门课都没有在签到";
         updateMonitorNotification(lastStatus);
         return;
       }
 
+      // 把列表交给界面（用来渲染「立即签到」按钮）
+      JSONArray pend = new JSONArray();
       StringBuilder sb = new StringBuilder();
       for (String[] o : ongoing) {
+        JSONObject item = new JSONObject();
+        item.put("course", o[0]);
+        item.put("id", o[1]);
+        item.put("type", o[2]);
+        item.put("title", o[3]);
+        pend.put(item);
+
         notifyOngoing(o[0], o[1], o[2], o[3]);
         if (sb.length() > 0) sb.append('；');
         sb.append(o[0]);
       }
+      pendingJson = pend.toString();
       lastStatus = "发现正在签到：" + sb;
       updateMonitorNotification(lastStatus);
     } catch (Exception e) {
@@ -303,6 +340,24 @@ public class MonitorService extends Service {
         .setDefaults(Notification.DEFAULT_ALL)
         .setAutoCancel(true)
         .setContentIntent(tap);
+
+    // 定位签到可以一键完成：坐标只是请求参数，不需要人真的在教室
+    // （能不能过要看服务器验不验距离，见 CheckinHelper 的说明）
+    if ("2".equals(type)) {
+      Intent sign = new Intent(this, MonitorService.class)
+          .setAction(ACTION_SIGN)
+          .putExtra(EXTRA_ATTENCE, attenceId);
+      PendingIntent pi =
+          PendingIntent.getService(
+              this,
+              attenceId.hashCode(),
+              sign,
+              PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+      b.addAction(android.R.drawable.ic_menu_mylocation, "立即定位签到", pi);
+      b.setStyle(
+          new Notification.BigTextStyle()
+              .bigText(typeName + "（" + title + "）\n点下面的按钮可一键用「教室坐标」签到"));
+    }
 
     NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
     if (nm != null) nm.notify(ID_ALERT, b.build());

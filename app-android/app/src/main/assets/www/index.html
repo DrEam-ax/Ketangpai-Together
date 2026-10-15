@@ -49,6 +49,17 @@
               <option value="60">60 秒</option>
             </select>
             <div class="tip pre" id="mon-status"></div>
+
+            <div class="dim small">教室坐标（定位签到用 —— 坐标是请求参数，人不用真在教室）</div>
+            <div class="grid2">
+              <input id="room-lat" placeholder="纬度 39.904200" inputmode="decimal" />
+              <input id="room-lng" placeholder="经度 116.407400" inputmode="decimal" />
+            </div>
+            <div class="row2">
+              <button id="room-save" class="ghost">保存坐标</button>
+              <button id="room-here" class="ghost">读当前位置</button>
+            </div>
+            <div id="pending"></div>
             <div class="note">
               <b>⚠️ 还要在手机设置里放行，否则可能收不到提醒</b>
               <span class="pre">设置 → 应用管理 →「课堂派签到」：
