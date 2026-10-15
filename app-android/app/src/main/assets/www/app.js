@@ -204,13 +204,45 @@ const KIND = { 1: "数字码签到", 2: "定位签到", 3: "扫码签到", 4: "�
  *
  * 定位签到（type=2）可以一键提交 —— 坐标只是请求参数，不需要人真的在教室。
  * 数字码/扫码需要额外信息（老师念的码 / 现场二维码），所以只显示、不给按钮。
+ *
+ * 同一份数据画到两个地方：设置栏的「签到提醒」里画全部，
+ * GPS 栏只画定位签到（那里才是处理它的地方）。
  */
 function renderPending(list) {
-  const box = $("#pending");
+  const gps = list.filter((x) => x.type === "2");
+  paintPending($("#pending"), list);
+  paintPending($("#pending-gps"), gps);
+
+  const tip = $("#gps-tip");
+  if (tip) {
+    tip.textContent = gps.length
+      ? "点「立即签到」就会用上面「签到位置」里生效的那个坐标提交。"
+      : "现在没有进行中的定位签到。有的话会自动出现在这里（需要在设置栏里先开启「签到提醒」）。";
+  }
+  const badge = $("#gps-badge");
+  if (badge) badge.textContent = gps.length ? `${gps.length} 个待签` : "";
+
+  // 底部标签上的小红点
+  const tab = document.querySelector('#tabbar .tab[data-tab="gps"]');
+  if (tab) {
+    let dot = tab.querySelector(".dot");
+    if (gps.length && !dot) {
+      dot = document.createElement("span");
+      dot.className = "dot";
+      tab.appendChild(dot);
+    } else if (!gps.length && dot) {
+      dot.remove();
+    }
+  }
+}
+
+function paintPending(box, list) {
+  if (!box) return;
   const sig = list.map((x) => x.id).join(",");
   if (box.dataset.sig === sig) return; // 列表没变就不重绘，免得按钮点到一半被重建
   box.dataset.sig = sig;
   box.innerHTML = "";
+  if (!list.length) return;
   for (const it of list) {
     const el = document.createElement("div");
     el.className = "pend";
@@ -229,7 +261,10 @@ function renderPending(list) {
       const r = JSON.parse(native.signLocationNow(b.dataset.sign));
       if (r.ok) {
         b.textContent = "已签到 ✓";
-        log(`定位签到成功：报的坐标 ${r.lat}, ${r.lng}`, "ok");
+        log(
+          `定位签到成功${r.place ? `（位置「${r.place}」）` : ""}：报的坐标 ${r.lat}, ${r.lng}`,
+          "ok",
+        );
       } else {
         b.disabled = false;
         b.textContent = "立即签到";
@@ -238,6 +273,45 @@ function renderPending(list) {
     }),
   );
 }
+
+// ---------------------------------------------------------------- 签到位置库
+
+// ---------------------------------------------------------------- 三栏切换
+
+const TABS = ["scan", "gps", "settings"];
+
+/**
+ * 切换底部三栏。
+ *
+ * 「要签的人」在扫码栏和 GPS 栏都要出现，而且勾选状态要互通 ——
+ * 所以它**只有一个 DOM 元素**，切栏时只切换它的显示，不做任何状态同步。
+ * 设置栏不需要它，就藏起来。
+ */
+function switchTab(name) {
+  if (TABS.indexOf(name) < 0) name = "scan";
+  for (const t of TABS) {
+    const pane = $("#pane-" + t);
+    if (pane) pane.classList.toggle("active", t === name);
+  }
+  const people = $("#pane-people");
+  if (people) people.style.display = name === "settings" ? "none" : "";
+
+  document.querySelectorAll("#tabbar .tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === name);
+  });
+  state.tab = name;
+  try {
+    localStorage.setItem("ktp.tab", name);
+  } catch {
+    /* 隐私模式下可能不让写，无所谓 */
+  }
+  if (name === "gps") loadLocations();
+  window.scrollTo(0, 0);
+}
+
+document.querySelectorAll("#tabbar .tab").forEach((b) =>
+  b.addEventListener("click", () => switchTab(b.dataset.tab)),
+);
 
 // ---------------------------------------------------------------- 签到位置库
 
@@ -740,9 +814,23 @@ $("#imp-text").addEventListener("click", () => doImport($("#exp-out").value, "�
     log("没有检测到 Android bridge —— 这个页面必须在 App 里打开。", "er");
     return;
   }
+
+  // 恢复上次停留的那一栏
+  let tab = "scan";
+  try {
+    const saved = localStorage.getItem("ktp.tab");
+    if (saved && TABS.indexOf(saved) >= 0) tab = saved;
+  } catch {
+    /* ignore */
+  }
+  switchTab(tab);
+
   loadSettings();
   loadAccounts();
   loadMonitor();
-  if (state.accounts.length === 0) $("#addbox").open = true;
+  if (state.accounts.length === 0) {
+    $("#addbox").open = true;
+    switchTab("settings"); // 一个账号都没有时直接把设置栏打开，省得用户找
+  }
   log("就绪。点「扫一扫签到」对准二维码即可。");
 })();

@@ -189,16 +189,24 @@ const FRAME = `<!doctype html>
     };
     new Image().src = "http://127.0.0.1:8899/diag?d=" + encodeURIComponent(JSON.stringify(out));
 
-    // 滚到要看的那张卡片，并把折叠卡展开（方便截图核对布局）
-    // 用法: frame.html#monitor  或  frame.html#location
+    // 看哪一栏 / 哪张卡：frame.html#scan / #gps / #settings / #location / #monitor
+    // 注意：App 是从 localStorage 恢复栏位的（不看 hash），所以这里直接**点那个标签**。
     var hash = window.location.hash.replace("#", "");
-    var boxFor = { monitor: "monbox", location: "locbox" };
-    var cardFor = { monitor: 1, location: 2 };
-    if (boxFor[hash]) {
-      var b = d.getElementById(boxFor[hash]);
-      if (b) b.open = true;
-      var card = d.querySelectorAll(".card")[cardFor[hash]];
-      if (card) w.scrollTo(0, card.getBoundingClientRect().top + w.scrollY - 60);
+    if (hash === "scan" || hash === "gps" || hash === "settings") {
+      var t = d.querySelector('#tabbar .tab[data-tab="' + hash + '"]');
+      if (t) t.click();
+      w.scrollTo(0, 0);
+    } else if (hash === "location" || hash === "monitor") {
+      if (hash === "location") {
+        d.querySelector('#tabbar .tab[data-tab="gps"]').click();
+        var lb = d.getElementById("locbox");
+        if (lb) lb.open = true;
+      } else {
+        d.querySelector('#tabbar .tab[data-tab="settings"]').click();
+        var mb = d.getElementById("monbox");
+        if (mb) mb.open = true;
+      }
+      w.scrollTo(0, 0);
     } else {
       w.scrollTo(0, 0);
     }

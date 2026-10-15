@@ -34,7 +34,8 @@ body {
   background: var(--bg);
   color: var(--fg);
   font: 15px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
-  padding-bottom: 28px;
+  /* 给底部切换栏留位置，否则最后一张卡会被挡住 */
+  padding-bottom: calc(66px + env(safe-area-inset-bottom, 0px));
 }
 
 /* ---------------- 顶栏 ---------------- */
@@ -60,6 +61,60 @@ header .sub {
 
 main {
   padding: 12px var(--pad-page);
+}
+
+/* ---------------- 三栏切换 ---------------- */
+
+/* 只有当前栏显示。要签的人（#pane-people）不在这里管，见 app.js 的 switchTab */
+.pane {
+  display: none;
+}
+.pane.active {
+  display: block;
+}
+
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  background: #12151c;
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.tabbar .tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 0 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 500;
+}
+.tabbar .tab .ic {
+  font-size: 19px;
+  line-height: 1.1;
+}
+.tabbar .tab.active {
+  color: var(--accent);
+  font-weight: 700;
+}
+/* 有正在进行的签到时，给标签加一个小红点 */
+.tabbar .tab .dot {
+  width: 7px;
+  height: 7px;
+  margin-top: -20px;
+  margin-left: 22px;
+  border-radius: 50%;
+  background: var(--danger);
 }
 
 /* ---------------- 卡片 ---------------- */

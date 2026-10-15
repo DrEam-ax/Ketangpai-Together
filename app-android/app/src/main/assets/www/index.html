@@ -13,149 +13,179 @@
     </header>
 
     <main>
-      <!-- ===== 要签的人 ===== -->
-      <div class="card">
-        <div class="head">
-          <span class="ttl">要签的人</span>
-          <span class="count" id="count">已选 0 / 0</span>
-          <label class="chk"><input type="checkbox" id="all" checked />全选</label>
+      <!--
+        「要签的人」在扫码栏和 GPS 栏都要显示，而且状态要互通。
+        做法是**只保留一个元素**，切栏时只控制它显示/隐藏 ——
+        这样勾选状态天然是同一份，不需要两边同步。
+      -->
+      <div id="pane-people">
+        <div class="card">
+          <div class="head">
+            <span class="ttl">要签的人</span>
+            <span class="count" id="count">已选 0 / 0</span>
+            <label class="chk"><input type="checkbox" id="all" checked />全选</label>
+          </div>
+          <div id="accounts" class="accounts"></div>
         </div>
-
-        <div id="accounts" class="accounts"></div>
-
-        <button class="big" id="scan">扫一扫签到</button>
-        <p class="tip">对准大屏上的二维码，识别到会自动签到</p>
-
-        <div id="result"></div>
       </div>
 
-      <!-- ===== 签到提醒 ===== -->
-      <div class="card">
-        <details id="monbox">
-          <summary>签到提醒<span class="mon-badge" id="mon-badge"></span></summary>
-          <div class="stack">
-            <div class="dim small">选一个人当「主成员」，他/她的课一旦有人在签到，手机就弹通知。</div>
-            <select id="primary"></select>
-            <div class="row2">
-              <button id="mon-start">开始监控</button>
-              <button id="mon-stop" class="ghost">停止</button>
+      <!-- ===== 栏1：扫码签到 ===== -->
+      <section id="pane-scan" class="pane">
+        <div class="card">
+          <button class="big" id="scan">扫一扫签到</button>
+          <p class="tip">对准大屏上的二维码，识别到会自动签到</p>
+          <div id="result"></div>
+        </div>
+      </section>
+
+      <!-- ===== 栏2：GPS 签到 ===== -->
+      <section id="pane-gps" class="pane">
+        <div class="card">
+          <div class="head">
+            <span class="ttl">正在进行的定位签到</span>
+            <span class="count" id="gps-badge"></span>
+          </div>
+          <div id="pending-gps"></div>
+          <p class="tip" id="gps-tip"></p>
+        </div>
+
+        <div class="card">
+          <details id="locbox">
+            <summary>签到位置<span class="mon-badge" id="loc-badge"></span></summary>
+            <div class="stack">
+              <div class="dim small">
+                定位签到时报给课堂派的坐标。可以存多个地方（不同教室、宿舍…），选一个生效。
+              </div>
+              <div id="locations" class="accounts"></div>
+
+              <input id="loc-name" placeholder="备注名，如 二教305" maxlength="20" />
+              <div class="grid2">
+                <input id="loc-lat" placeholder="纬度 39.904200" inputmode="decimal" />
+                <input id="loc-lng" placeholder="经度 116.407400" inputmode="decimal" />
+              </div>
+              <div class="row2">
+                <button id="loc-save">保存为位置</button>
+                <button id="loc-here" class="ghost">读当前位置</button>
+              </div>
+              <div class="row2" id="loc-pick" style="display: none">
+                <button id="loc-use-wgs" class="ghost">用 GPS 原始</button>
+                <button id="loc-use-gcj" class="ghost">用高德坐标</button>
+              </div>
+              <div class="tip pre" id="loc-hint"></div>
             </div>
-            <div class="dim small">检查频率（每轮都要逐门课问一遍，越短越费流量）</div>
-            <select id="poll">
-              <option value="5">5 秒（最快）</option>
-              <option value="10">10 秒（推荐）</option>
-              <option value="20">20 秒</option>
-              <option value="30">30 秒（省流量）</option>
-              <option value="60">60 秒</option>
-            </select>
-            <div class="tip pre" id="mon-status"></div>
-            <div id="pending"></div>
-            <div class="note">
-              <b>⚠️ 还要在手机设置里放行，否则可能收不到提醒</b>
-              <span class="pre">设置 → 应用管理 →「课堂派签到」：
+          </details>
+        </div>
+      </section>
+
+      <!-- ===== 栏3：设置 ===== -->
+      <section id="pane-settings" class="pane">
+        <!-- 签到提醒 -->
+        <div class="card">
+          <details id="monbox">
+            <summary>签到提醒<span class="mon-badge" id="mon-badge"></span></summary>
+            <div class="stack">
+              <div class="dim small">选一个人当「主成员」，他/她的课一旦有人在签到，手机就弹通知。</div>
+              <select id="primary"></select>
+              <div class="row2">
+                <button id="mon-start">开始监控</button>
+                <button id="mon-stop" class="ghost">停止</button>
+              </div>
+              <div class="dim small">检查频率（每轮都要逐门课问一遍，越短越费流量）</div>
+              <select id="poll">
+                <option value="5">5 秒（最快）</option>
+                <option value="10">10 秒（推荐）</option>
+                <option value="20">20 秒</option>
+                <option value="30">30 秒（省流量）</option>
+                <option value="60">60 秒</option>
+              </select>
+              <div class="tip pre" id="mon-status"></div>
+              <div id="pending"></div>
+              <div class="note">
+                <b>⚠️ 还要在手机设置里放行，否则可能收不到提醒</b>
+                <span class="pre">设置 → 应用管理 →「课堂派签到」：
 · 自启动 / 允许后台运行 → 打开
 · 电池 → 不限制后台行为（关掉省电优化）
 · 通知 → 允许</span>
-              <span class="dim">各家 ROM 叫法不同，小米叫「自启动」+「省电策略：无限制」，
+                <span class="dim">各家 ROM 叫法不同，小米叫「自启动」+「省电策略：无限制」，
 华为叫「应用启动管理：手动管理」，OPPO/vivo 叫「允许后台运行」。</span>
+              </div>
             </div>
-          </div>
-        </details>
-      </div>
-
-      <!-- ===== 签到位置 ===== -->
-      <div class="card">
-        <details id="locbox">
-          <summary>签到位置（定位签到用）<span class="mon-badge" id="loc-badge"></span></summary>
-          <div class="stack">
-            <div class="dim small">
-              定位签到时报给课堂派的坐标。可以存多个地方（不同教室、宿舍…），选一个生效。
-            </div>
-            <div id="locations" class="accounts"></div>
-
-            <input id="loc-name" placeholder="备注名，如 二教305" maxlength="20" />
-            <div class="grid2">
-              <input id="loc-lat" placeholder="纬度 39.904200" inputmode="decimal" />
-              <input id="loc-lng" placeholder="经度 116.407400" inputmode="decimal" />
-            </div>
-            <div class="row2">
-              <button id="loc-save">保存为位置</button>
-              <button id="loc-here" class="ghost">读当前位置</button>
-            </div>
-            <div class="row2" id="loc-pick" style="display: none">
-              <button id="loc-use-wgs" class="ghost">用 GPS 原始</button>
-              <button id="loc-use-gcj" class="ghost">用高德坐标</button>
-            </div>
-            <div class="tip pre" id="loc-hint"></div>
-          </div>
-        </details>
-      </div>
-
-      <!-- ===== 添加账号 ===== -->
-      <div class="card">
-        <details id="addbox">
-          <summary>添加账号</summary>
-          <div class="stack">
-            <input id="k" placeholder="备注名，如 小王" />
-            <input id="e" placeholder="课堂派手机号" />
-            <input id="p" type="password" placeholder="密码" />
-            <button id="add">添加并验证登录</button>
-          </div>
-          <p class="tip" id="addhint">会先真实登录一次，成功才保存到本机。</p>
-        </details>
-      </div>
-
-      <!-- ===== IP 设置 ===== -->
-      <div class="card">
-        <details id="ipbox">
-          <summary>IP 设置</summary>
-          <div class="stack">
-            <div class="dim small">签到时报给课堂派的 IP（教师端考勤表里有这一列）</div>
-            <select id="ipmode">
-              <option value="perAccount">每个账号各自一个固定 IP（推荐）</option>
-              <option value="same">所有账号共用同一个 IP</option>
-              <option value="real">不伪造，用手机真实 IP</option>
-            </select>
-            <div class="dim small" id="iphint"></div>
-            <button id="reroll" class="ghost">重新随机所有 IP</button>
-          </div>
-        </details>
-      </div>
-
-      <!-- ===== 成员迁移 ===== -->
-      <div class="card">
-        <details id="migratebox">
-          <summary>成员迁移（换手机用）</summary>
-          <div class="stack">
-            <div class="dim small">
-              导出成一段文本 → 复制或分享到新手机 → 在新手机上「从剪贴板导入」。
-            </div>
-
-            <label class="chk"><input type="checkbox" id="exp-secrets" checked />包含密码（不勾选则导入后要重填）</label>
-            <div class="row2">
-              <button id="exp-copy">导出并复制</button>
-              <button id="exp-share" class="ghost">分享</button>
-            </div>
-
-            <label class="chk"><input type="checkbox" id="imp-replace" />覆盖现有成员（不勾选则按备注名合并）</label>
-            <button id="imp-clip" class="ghost">从剪贴板导入</button>
-
-            <textarea id="exp-out" rows="3" placeholder="导出结果会出现在这里；也可以把别人发你的内容粘进来"></textarea>
-            <button id="imp-text" class="ghost">从上面文本框导入</button>
-
-            <p class="tip" id="migrate-hint"></p>
-          </div>
-        </details>
-      </div>
-
-      <!-- ===== 日志 ===== -->
-      <div class="card">
-        <div class="head">
-          <span class="ttl">日志</span>
+          </details>
         </div>
-        <div id="log" class="log"></div>
-      </div>
+
+        <!-- 添加账号 -->
+        <div class="card">
+          <details id="addbox">
+            <summary>添加账号</summary>
+            <div class="stack">
+              <input id="k" placeholder="备注名，如 小王" />
+              <input id="e" placeholder="课堂派手机号" />
+              <input id="p" type="password" placeholder="密码" />
+              <button id="add">添加并验证登录</button>
+            </div>
+            <p class="tip" id="addhint">会先真实登录一次，成功才保存到本机。</p>
+          </details>
+        </div>
+
+        <!-- IP 设置 -->
+        <div class="card">
+          <details id="ipbox">
+            <summary>IP 设置</summary>
+            <div class="stack">
+              <div class="dim small">签到时报给课堂派的 IP（教师端考勤表里有这一列）</div>
+              <select id="ipmode">
+                <option value="perAccount">每个账号各自一个固定 IP（推荐）</option>
+                <option value="same">所有账号共用同一个 IP</option>
+                <option value="real">不伪造，用手机真实 IP</option>
+              </select>
+              <div class="dim small" id="iphint"></div>
+              <button id="reroll" class="ghost">重新随机所有 IP</button>
+            </div>
+          </details>
+        </div>
+
+        <!-- 成员迁移 -->
+        <div class="card">
+          <details id="migratebox">
+            <summary>成员迁移（换手机用）</summary>
+            <div class="stack">
+              <div class="dim small">
+                导出成一段文本 → 复制或分享到新手机 → 在新手机上「从剪贴板导入」。
+              </div>
+
+              <label class="chk"><input type="checkbox" id="exp-secrets" checked />包含密码（不勾选则导入后要重填）</label>
+              <div class="row2">
+                <button id="exp-copy">导出并复制</button>
+                <button id="exp-share" class="ghost">分享</button>
+              </div>
+
+              <label class="chk"><input type="checkbox" id="imp-replace" />覆盖现有成员（不勾选则按备注名合并）</label>
+              <button id="imp-clip" class="ghost">从剪贴板导入</button>
+
+              <textarea id="exp-out" rows="3" placeholder="导出结果会出现在这里；也可以把别人发你的内容粘进来"></textarea>
+              <button id="imp-text" class="ghost">从上面文本框导入</button>
+
+              <p class="tip" id="migrate-hint"></p>
+            </div>
+          </details>
+        </div>
+
+        <!-- 日志 -->
+        <div class="card">
+          <div class="head">
+            <span class="ttl">日志</span>
+          </div>
+          <div id="log" class="log"></div>
+        </div>
+      </section>
     </main>
+
+    <!-- ===== 底部三栏切换 ===== -->
+    <nav class="tabbar" id="tabbar">
+      <button class="tab active" data-tab="scan"><span class="ic">▣</span>扫码签到</button>
+      <button class="tab" data-tab="gps"><span class="ic">◎</span>GPS 签到</button>
+      <button class="tab" data-tab="settings"><span class="ic">⚙</span>设置</button>
+    </nav>
 
     <script src="app.js"></script>
   </body>

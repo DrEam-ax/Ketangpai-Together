@@ -11,10 +11,12 @@ const source = fs.readFileSync(APP, "utf8");
 function stubEl() {
   const el = {
     addEventListener() {},
+    querySelector() { return stubEl(); },
     querySelectorAll() { return []; },
     insertAdjacentHTML() {},
     closest() { return stubEl(); },
     appendChild() {},
+    remove() {},
     classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
     dataset: {},
     style: {},
@@ -29,11 +31,17 @@ function stubEl() {
   return el;
 }
 
-const documentStub = { querySelector: () => stubEl(), createElement: () => stubEl() };
-const windowStub = {};
+// document 也要有 querySelectorAll —— 底部三栏切换会用到（这里返回空数组就够了）
+const documentStub = {
+  querySelector: () => stubEl(),
+  querySelectorAll: () => [],
+  createElement: () => stubEl(),
+};
+const windowStub = { scrollTo() {} };
 
 globalThis.document = documentStub;
 globalThis.window = windowStub;
+globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 globalThis.Image = class {};
 globalThis.FileReader = class {};
 globalThis.URL = { createObjectURL: () => "", revokeObjectURL() {} };
