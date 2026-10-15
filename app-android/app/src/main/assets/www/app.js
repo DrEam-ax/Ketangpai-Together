@@ -193,13 +193,8 @@ function loadMonitor() {
     badge.textContent = "";
   }
 
-  // 教室坐标（用户正在输入时不要覆盖他）
-  const lat = $("#room-lat");
-  const lng = $("#room-lng");
-  if (document.activeElement !== lat && !lat.value) lat.value = r.roomLat || "";
-  if (document.activeElement !== lng && !lng.value) lng.value = r.roomLng || "";
-
   renderPending(r.pending || []);
+  loadLocations();
 }
 
 const KIND = { 1: "数字码签到", 2: "定位签到", 3: "扫码签到", 4: "签到签出" };
@@ -244,17 +239,76 @@ function renderPending(list) {
   );
 }
 
-$("#room-save").addEventListener("click", () => {
-  const lat = $("#room-lat").value.trim();
-  const lng = $("#room-lng").value.trim();
-  if (!lat || !lng) {
-    log("经纬度都要填", "wa");
+// ---------------------------------------------------------------- 签到位置库
+
+/** 上次「读当前位置」拿到的结果，供两套坐标的选用按钮使用 */
+let lastFix = null;
+
+function loadLocations() {
+  let r;
+  try {
+    r = JSON.parse(native.listLocations());
+  } catch {
     return;
   }
-  const r = JSON.parse(native.setRoomLocation(lat, lng));
-  if (r.ok) log(`教室坐标已保存：${lat}, ${lng}`, "ok");
-  else log(`保存失败：${r.error}`, "er");
-  loadMonitor();
+  if (!r.ok) return;
+
+  const box = $("#locations");
+  box.innerHTML = "";
+  const list = r.locations || [];
+  if (list.length === 0) {
+    box.innerHTML = `<div class="empty">还没有保存的位置 —— 在下面填一个，或者在教室里点「读当前位置」。</div>`;
+  }
+  for (const loc of list) {
+    const on = loc.name === r.active;
+    const el = document.createElement("div");
+    el.className = "acc" + (on ? " checked" : "");
+    el.innerHTML =
+      `<input type="radio" name="loc" data-use="${esc(loc.name)}" ${on ? "checked" : ""} />` +
+      `<span class="who"><span class="nm">${esc(loc.name)}</span>` +
+      `<span class="sub2">${esc(loc.lat)}, ${esc(loc.lng)}</span></span>` +
+      `<span class="ip">${on ? "生效中" : ""}</span>` +
+      `<button class="x" data-del="${esc(loc.name)}" title="删除">×</button>`;
+    box.appendChild(el);
+  }
+  box.querySelectorAll("input[data-use]").forEach((rb) =>
+    rb.addEventListener("change", () => {
+      native.useLocation(rb.dataset.use);
+      log(`签到位置已切换为「${rb.dataset.use}」`, "ok");
+      loadLocations();
+    }),
+  );
+  box.querySelectorAll("button[data-del]").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (!confirm(`删除位置「${b.dataset.del}」？`)) return;
+      native.removeLocation(b.dataset.del);
+      log(`已删除位置「${b.dataset.del}」`, "wa");
+      loadLocations();
+    }),
+  );
+
+  const badge = $("#loc-badge");
+  const active = list.find((x) => x.name === r.active);
+  if (active) {
+    badge.textContent = active.name;
+    badge.style.color = "var(--ok)";
+  } else {
+    badge.textContent = list.length ? "未选" : "";
+    badge.style.color = "var(--warn)";
+  }
+}
+
+$("#loc-save").addEventListener("click", () => {
+  const name = $("#loc-name").value.trim();
+  const lat = $("#loc-lat").value.trim();
+  const lng = $("#loc-lng").value.trim();
+  if (!name) return log("先填个备注名（比如「二教305」）", "wa");
+  if (!lat || !lng) return log("经纬度都要填", "wa");
+  const r = JSON.parse(native.addLocation(name, lat, lng));
+  if (!r.ok) return log(`保存失败：${r.error}`, "er");
+  log(`位置「${name}」已保存，并已设为生效（${lat}, ${lng}）`, "ok");
+  $("#loc-name").value = "";
+  loadLocations();
 });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -262,16 +316,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * 读当前位置。
  *
- * 之前只读一次系统的「最后已知位置」，真机上读偏了几百米 —— 两个原因：
- *   1. 那个位置**可能来自模拟定位**（装了影梭之类的改定位 App 时，
- *      系统返回的就是它设的假点，而不是你的真实位置）
- *   2. 网络定位常常又新又粗，原来"按时间取最新"会把 GPS 更准的结果顶掉
- * 现在：主动申请一次定位更新，反复取（原生侧按**精度**挑最好的），
- * 拿到 ±30 米以内就停；并明确标出「模拟定位」和「系统缓存」。
+ * 真机上「读出来的位置偏了几百米」，两个原因都要处理：
+ *   1. 系统的 getLastKnownLocation **可能来自模拟定位**（影梭之类设的假点）
+ *      —— 现在会检测并明确警告（但用户实测没开影梭也偏，所以还有下面这条）
+ *   2. **坐标系不一致**：手机给的是 WGS-84，而高德/腾讯地图（课堂派几乎肯定用它）
+ *      用的是 GCJ-02「火星坐标」，国内两者差 300~600 米 —— 量级正好对得上。
+ *      所以这里**两套都算出来**，让用户对着高德自己判断用哪个。
  */
-$("#room-here").addEventListener("click", async () => {
-  const btn = $("#room-here");
-  const hint = $("#room-hint");
+$("#loc-here").addEventListener("click", async () => {
+  const btn = $("#loc-here");
+  const hint = $("#loc-hint");
+  const pick = $("#loc-pick");
+  pick.style.display = "none";
+  lastFix = null;
+
   const s = JSON.parse(native.startLocating());
   if (!s.ok) {
     hint.textContent = s.error || "定位没启动起来";
@@ -305,24 +363,45 @@ $("#room-here").addEventListener("click", async () => {
     hint.textContent = "拿不到定位结果 —— 到窗边或室外再试一次，或直接照抄高德的坐标";
     return;
   }
+  lastFix = best;
 
-  $("#room-lat").value = best.lat;
-  $("#room-lng").value = best.lng;
-
+  const lines = [];
+  lines.push(`手机读到（WGS-84 GPS）：${best.lat}, ${best.lng}`);
+  lines.push(`换算成高德坐标（GCJ-02）：${best.latGcj}, ${best.lngGcj}`);
+  lines.push(`两者相差 ${best.offsetMeters} 米`);
+  lines.push("");
+  lines.push("用哪个？ 在高德里长按教室看它显示的坐标，和哪一组一样就用哪一组。");
   if (best.mock) {
-    hint.textContent +=
-      "\n⚠️ 这个位置是**模拟定位**（影梭之类设的假点），不是你的真实位置。\n要读真实位置：先去影梭里「停止模拟」或直接关掉它，再点一次「读当前位置」。";
-    log("⚠️ 读到的位置来自模拟定位 —— 很可能是影梭设的假点，不是你站的地方。", "wa");
+    lines.push("");
+    lines.push("⚠️ 这次读到的位置来自**模拟定位**（影梭之类），不是真实位置。");
   } else if (best.accuracy > 50) {
-    hint.textContent += "\n精度还不够好（±" + best.accuracy + " 米）。到窗边/室外再点一次，或直接照抄高德的坐标。";
+    lines.push("");
+    lines.push(`⚠️ 精度一般（±${best.accuracy} 米），到窗边/室外再点一次会更准。`);
   }
-  log(
-    `读到位置 ${best.lat}, ${best.lng}（精度 ±${best.accuracy} 米 · ${best.provider}${
-      best.cached ? " · 系统缓存" : ""
-    }）—— 确认后点「保存坐标」`,
-    best.mock ? "wa" : "ok",
-  );
+  hint.textContent = lines.join("\n");
+  pick.style.display = "grid";
+
+  // 默认按「课堂派用高德坐标系」预填（国产 App 的绝大多数情况），用户可以改用另一组
+  $("#loc-lat").value = best.latGcj;
+  $("#loc-lng").value = best.lngGcj;
+  if (!$("#loc-name").value) $("#loc-name").value = "当前位置";
+  log(`读到位置：WGS-84 ${best.lat}, ${best.lng} ／ GCJ-02 ${best.latGcj}, ${best.lngGcj}`, "ok");
 });
+
+$("#loc-use-wgs").addEventListener("click", () => {
+  if (!lastFix) return;
+  $("#loc-lat").value = lastFix.lat;
+  $("#loc-lng").value = lastFix.lng;
+  log("已填入 GPS 原始坐标（WGS-84）", "ok");
+});
+
+$("#loc-use-gcj").addEventListener("click", () => {
+  if (!lastFix) return;
+  $("#loc-lat").value = lastFix.latGcj;
+  $("#loc-lng").value = lastFix.lngGcj;
+  log("已填入高德坐标（GCJ-02）", "ok");
+});
+
 
 $("#primary").addEventListener("change", (e) => {
   native.setPrimary(e.target.value);

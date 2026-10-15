@@ -28,15 +28,17 @@ final class CheckinHelper {
 
   private CheckinHelper() {}
 
-  /** 用已保存的教室坐标，给指定的定位签到提交一次。 */
+  /** 用已保存的位置，给指定的定位签到提交一次。 */
   static JSONObject signLocation(Context ctx, String attenceId) {
     try {
       SharedPreferences prefs = ctx.getSharedPreferences(MonitorService.PREFS, Context.MODE_PRIVATE);
-      String lat = prefs.getString(PREF_LAT, "");
-      String lng = prefs.getString(PREF_LNG, "");
-      if (lat == null || lat.isEmpty() || lng == null || lng.isEmpty()) {
-        return err("还没填教室坐标 —— 在「签到提醒」里填，或点「读当前位置」");
+      double[] coords = LocationStore.activeCoords(prefs);
+      if (coords == null) {
+        return err("还没有可用的位置 —— 在「签到位置」里存一个，或点「读当前位置」");
       }
+      String lat = String.format(java.util.Locale.US, "%.6f", coords[0]);
+      String lng = String.format(java.util.Locale.US, "%.6f", coords[1]);
+
       JSONObject acc = KtpApi.primaryAccount(prefs);
       if (acc == null) return err("还没选主成员");
       String ip = KtpApi.ipForAccount(prefs, acc);
@@ -62,6 +64,8 @@ final class CheckinHelper {
       out.put("message", res.optString("message", ok ? "签到成功" : "签到失败"));
       out.put("lat", lat);
       out.put("lng", lng);
+      JSONObject a = LocationStore.active(prefs);
+      out.put("place", a == null ? "" : a.optString("name", ""));
       return out;
     } catch (Exception e) {
       return err(String.valueOf(e.getMessage()));

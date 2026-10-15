@@ -646,29 +646,45 @@ public class MainActivity extends Activity {
       return "{\"ok\":true}";
     }
 
-    // ---------------------------------------------------------- 定位签到
+    // ---------------------------------------------------------- 签到位置库
 
     /**
-     * 保存教室坐标。定位签到报的就是这个 ——
-     * 坐标是请求体里的普通参数，不需要手机真的在教室（见 CheckinHelper 的说明）。
+     * 列出保存的签到位置。定位签到时报的是「当前生效」那个的原样数值。
+     * 存储结构见 LocationStore。
      */
     @JavascriptInterface
-    public String setRoomLocation(String lat, String lng) {
+    public String listLocations() {
+      JSONObject out = new JSONObject();
       try {
-        double la = Double.parseDouble(lat.trim());
-        double ln = Double.parseDouble(lng.trim());
-        if (la < -90 || la > 90 || ln < -180 || ln > 180) {
-          return "{\"ok\":false,\"error\":\"坐标超出范围\"}";
-        }
-        prefs
-            .edit()
-            .putString(CheckinHelper.PREF_LAT, String.format(Locale.US, "%.6f", la))
-            .putString(CheckinHelper.PREF_LNG, String.format(Locale.US, "%.6f", ln))
-            .apply();
+        out.put("ok", true);
+        out.put("active", prefs.getString(LocationStore.KEY_ACTIVE, ""));
+        out.put("locations", LocationStore.list(prefs));
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+      return out.toString();
+    }
+
+    @JavascriptInterface
+    public String addLocation(String name, String lat, String lng) {
+      try {
+        LocationStore.add(prefs, name, lat, lng);
         return "{\"ok\":true}";
       } catch (Exception e) {
-        return errJson("坐标格式不对：" + e.getMessage());
+        return errJson(String.valueOf(e.getMessage()));
       }
+    }
+
+    @JavascriptInterface
+    public String removeLocation(String name) {
+      LocationStore.remove(prefs, name);
+      return "{\"ok\":true}";
+    }
+
+    @JavascriptInterface
+    public String useLocation(String name) {
+      LocationStore.setActive(prefs, name);
+      return "{\"ok\":true}";
     }
 
     /**
@@ -817,6 +833,17 @@ public class MainActivity extends Activity {
         out.put("provider", String.valueOf(best.getProvider()));
         out.put("mock", isMockLocation(best));
         out.put("cached", cached);
+
+        // 系统给的是 WGS-84；课堂派是国产 App（高德/腾讯 SDK），很可能用 GCJ-02。
+        // 两套都给出去、并算出差多少米，让用户对着高德自己判断该用哪个 ——
+        // 这个只能靠用户在地图上核，代码里猜不出来。
+        double[] gcj = Coord.wgs2gcj(best.getLatitude(), best.getLongitude());
+        out.put("latGcj", String.format(Locale.US, "%.6f", gcj[0]));
+        out.put("lngGcj", String.format(Locale.US, "%.6f", gcj[1]));
+        out.put(
+            "offsetMeters",
+            Math.round(
+                Coord.meters(best.getLatitude(), best.getLongitude(), gcj[0], gcj[1])));
       } catch (Exception e) {
         return errJson(String.valueOf(e.getMessage()));
       }

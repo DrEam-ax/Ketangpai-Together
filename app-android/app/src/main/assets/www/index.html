@@ -49,17 +49,6 @@
               <option value="60">60 秒</option>
             </select>
             <div class="tip pre" id="mon-status"></div>
-
-            <div class="dim small">教室坐标（定位签到用 —— 坐标是请求参数，人不用真在教室）</div>
-            <div class="grid2">
-              <input id="room-lat" placeholder="纬度 39.904200" inputmode="decimal" />
-              <input id="room-lng" placeholder="经度 116.407400" inputmode="decimal" />
-            </div>
-            <div class="row2">
-              <button id="room-save" class="ghost">保存坐标</button>
-              <button id="room-here" class="ghost">读当前位置</button>
-            </div>
-            <div class="tip pre" id="room-hint"></div>
             <div id="pending"></div>
             <div class="note">
               <b>⚠️ 还要在手机设置里放行，否则可能收不到提醒</b>
@@ -70,6 +59,34 @@
               <span class="dim">各家 ROM 叫法不同，小米叫「自启动」+「省电策略：无限制」，
 华为叫「应用启动管理：手动管理」，OPPO/vivo 叫「允许后台运行」。</span>
             </div>
+          </div>
+        </details>
+      </div>
+
+      <!-- ===== 签到位置 ===== -->
+      <div class="card">
+        <details id="locbox">
+          <summary>签到位置（定位签到用）<span class="mon-badge" id="loc-badge"></span></summary>
+          <div class="stack">
+            <div class="dim small">
+              定位签到时报给课堂派的坐标。可以存多个地方（不同教室、宿舍…），选一个生效。
+            </div>
+            <div id="locations" class="accounts"></div>
+
+            <input id="loc-name" placeholder="备注名，如 二教305" maxlength="20" />
+            <div class="grid2">
+              <input id="loc-lat" placeholder="纬度 39.904200" inputmode="decimal" />
+              <input id="loc-lng" placeholder="经度 116.407400" inputmode="decimal" />
+            </div>
+            <div class="row2">
+              <button id="loc-save">保存为位置</button>
+              <button id="loc-here" class="ghost">读当前位置</button>
+            </div>
+            <div class="row2" id="loc-pick" style="display: none">
+              <button id="loc-use-wgs" class="ghost">用 GPS 原始</button>
+              <button id="loc-use-gcj" class="ghost">用高德坐标</button>
+            </div>
+            <div class="tip pre" id="loc-hint"></div>
           </div>
         </details>
       </div>

@@ -59,6 +59,14 @@ const MOCK = `
     setPrimary: () => '{"ok":true}',
     setPollSeconds: () => '{"ok":true}',
     setRoomLocation: () => '{"ok":true}',
+    listLocations: () => JSON.stringify({ ok: true, active: "二教305", locations: [
+      { name: "二教305", lat: "39.904200", lng: "116.407400" },
+      { name: "宿舍", lat: "39.910000", lng: "116.420000" },
+      { name: "一个特别长的位置名字测试", lat: "39.908700", lng: "116.397500" },
+    ] }),
+    addLocation: () => '{"ok":true}',
+    removeLocation: () => '{"ok":true}',
+    useLocation: () => '{"ok":true}',
     readCurrentLocation: () => JSON.stringify({ ok: true, lat: "39.904200", lng: "116.407400", accuracy: 12, ageSec: 2, provider: "gps", mock: false, cached: false }),
     startLocating: () => JSON.stringify({ ok: true, providers: "gps network", gpsOn: true }),
     stopLocatingNow: () => '{"ok":true}',
@@ -181,9 +189,15 @@ const FRAME = `<!doctype html>
     };
     new Image().src = "http://127.0.0.1:8899/diag?d=" + encodeURIComponent(JSON.stringify(out));
 
-    // 滚到「签到提醒」卡片，方便截图看它的布局
-    if (window.location.hash === "#monitor") {
-      var card = d.querySelectorAll(".card")[1];
+    // 滚到要看的那张卡片，并把折叠卡展开（方便截图核对布局）
+    // 用法: frame.html#monitor  或  frame.html#location
+    var hash = window.location.hash.replace("#", "");
+    var boxFor = { monitor: "monbox", location: "locbox" };
+    var cardFor = { monitor: 1, location: 2 };
+    if (boxFor[hash]) {
+      var b = d.getElementById(boxFor[hash]);
+      if (b) b.open = true;
+      var card = d.querySelectorAll(".card")[cardFor[hash]];
       if (card) w.scrollTo(0, card.getBoundingClientRect().top + w.scrollY - 60);
     } else {
       w.scrollTo(0, 0);
