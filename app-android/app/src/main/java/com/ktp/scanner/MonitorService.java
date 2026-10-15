@@ -46,9 +46,16 @@ public class MonitorService extends Service {
   static final int ID_MONITOR = 1001;
   static final int ID_ALERT = 2001;
 
-  /** 轮询间隔。一次要问 28 门课，30 秒已经有点密了，别再往下调。 */
-  private static final long POLL_INTERVAL_MS = 30_000L;
-  private static final int MAX_PARALLEL = 5;
+  /**
+   * 默认轮询间隔。
+   *
+   * 从 30 秒缩到 10 秒是因为真机反馈「不够及时」——签到窗口短，晚半分钟可能就错过了。
+   * 代价：一次要给 28 门课发请求，10 秒一轮 ≈ 每分钟 168 个请求（每个几百字节），
+   * 一节课两小时约 2~4MB 流量。可以在界面上调（5~120 秒）。
+   */
+  private static final long DEFAULT_POLL_MS = 10_000L;
+  private static final long MIN_POLL_MS = 5_000L;
+  private static final int MAX_PARALLEL = 8;
 
   /** 上一次轮询的结论，给界面显示用（静态，方便 Activity 直接读）。 */
   static volatile String lastStatus = "未启动";
@@ -84,15 +91,22 @@ public class MonitorService extends Service {
     running = true;
     lastStatus = "已启动，正在检查…";
     handler.removeCallbacksAndMessages(null);
+    final long interval = pollIntervalMs();
     handler.post(
         new Runnable() {
           @Override
           public void run() {
             pollOnce();
-            handler.postDelayed(this, POLL_INTERVAL_MS);
+            handler.postDelayed(this, pollIntervalMs());
           }
         });
     return START_STICKY;
+  }
+
+  /** 轮询间隔：界面可调，存 prefs；有下限保护，避免被填成 0 把服务打死。 */
+  private long pollIntervalMs() {
+    long v = prefs.getLong("pollIntervalMs", DEFAULT_POLL_MS);
+    return Math.max(MIN_POLL_MS, Math.min(120_000L, v));
   }
 
   @Override
@@ -159,14 +173,22 @@ public class MonitorService extends Service {
       final String fIp = ip;
       final int n = courses.size();
       final CountDownLatch latch = new CountDownLatch(n);
+      // 并发上限：28 门课同时开 28 个线程没必要，反而更容易被风控
+      final java.util.concurrent.Semaphore gate =
+          new java.util.concurrent.Semaphore(MAX_PARALLEL);
 
-      // 并发问，但限制并发数 —— 28 门课串行问会拖到十几秒
       for (int i = 0; i < n; i++) {
         final JSONObject c = courses.get(i);
         new Thread(
                 new Runnable() {
                   @Override
                   public void run() {
+                    try {
+                      gate.acquire();
+                    } catch (InterruptedException ie) {
+                      latch.countDown();
+                      return;
+                    }
                     try {
                       JSONObject body = new JSONObject();
                       body.put("courseid", c.optString("id"));
@@ -190,6 +212,7 @@ public class MonitorService extends Service {
                     } catch (Exception ignored) {
                       // 单门课失败不该让整轮失败
                     } finally {
+                      gate.release();
                       latch.countDown();
                     }
                   }

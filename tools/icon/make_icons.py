@@ -148,6 +148,12 @@ def main():
         art = resized(squared, inner)
         off = (px - inner) // 2
         canvas[off : off + inner, off : off + inner] = art
+        if off > 2:
+            # 纯色填充在**渐变背景**的作品上会显出一个方框轮廓（这次的蓝色图标就是）。
+            # 改成让作品边缘那一圈的颜色往四周平滑延展（inpaint），接缝就看不出来了。
+            mask = np.full((px, px), 255, np.uint8)
+            mask[off : off + inner, off : off + inner] = 0
+            canvas = cv2.inpaint(canvas, mask, max(3, off // 3), cv2.INPAINT_TELEA)
         write_png(os.path.join(RES, f"mipmap-{dens}", "ic_launcher_foreground.png"), canvas)
 
     # ---- 自适应图标描述文件 + 背景色 ----

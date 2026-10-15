@@ -42,8 +42,24 @@
             <button id="mon-start">开始监控</button>
             <button id="mon-stop" class="ghost">停止</button>
           </div>
+          <div class="dim small">检查频率（一次要问 28 门课，越短越费流量）</div>
+          <select id="poll">
+            <option value="5">5 秒（最快）</option>
+            <option value="10">10 秒（推荐）</option>
+            <option value="20">20 秒</option>
+            <option value="30">30 秒（省流量）</option>
+            <option value="60">60 秒</option>
+          </select>
           <div class="tip pre" id="mon-status"></div>
-          <div class="dim small">上课时打开，下课后记得关掉（一次检查要问 28 门课，比较费流量）。</div>
+          <div class="note">
+            <b>⚠️ 还要在手机设置里放行，否则可能收不到提醒</b>
+            <span class="pre">设置 → 应用管理 →「课堂派签到」：
+· 自启动 / 允许后台运行 → 打开
+· 电池 → 不限制后台行为（关掉省电优化）
+· 通知 → 允许</span>
+            <span class="dim">各家 ROM 叫法不同，小米叫「自启动」+「省电策略：无限制」，
+华为叫「应用启动管理：手动管理」，OPPO/vivo 叫「允许后台运行」。</span>
+          </div>
         </div>
       </div>
 

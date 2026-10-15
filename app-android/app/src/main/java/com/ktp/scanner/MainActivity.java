@@ -603,6 +603,7 @@ public class MainActivity extends Activity {
         out.put("status", MonitorService.lastStatus);
         out.put("lastCheckAt", MonitorService.lastCheckAt);
         out.put("notifGranted", notificationsAllowed());
+        out.put("pollMs", prefs.getLong("pollIntervalMs", 10000L));
       } catch (Exception e) {
         return errJson(String.valueOf(e.getMessage()));
       }
@@ -612,6 +613,14 @@ public class MainActivity extends Activity {
     @JavascriptInterface
     public String setPrimary(String key) {
       prefs.edit().putString("primaryKey", key == null ? "" : key).apply();
+      return "{\"ok\":true}";
+    }
+
+    /** 调轮询间隔（秒）。服务里还有下限保护，避免被填成 0 把服务打死。 */
+    @JavascriptInterface
+    public String setPollSeconds(int seconds) {
+      long ms = Math.max(5, Math.min(120, seconds)) * 1000L;
+      prefs.edit().putLong("pollIntervalMs", ms).apply();
       return "{\"ok\":true}";
     }
 

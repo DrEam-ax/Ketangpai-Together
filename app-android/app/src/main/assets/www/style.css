@@ -110,14 +110,36 @@ main {
   margin: 8px 0 0;
   text-align: center;
 }
-/* 需要保留换行的提示（监控状态是多行） */
-.tip.pre {
+/* 需要保留换行的提示（监控状态、设置步骤都是多行） */
+.pre {
   white-space: pre-line;
+}
+.tip.pre {
   text-align: left;
 }
 /* 监控正在跑时给个视觉标记 */
 .tip.live {
   color: var(--ok);
+}
+
+/* 需要注意的设置提示（签到提醒卡片底部） */
+.note {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 176, 32, 0.45);
+  border-radius: 10px;
+  background: rgba(255, 176, 32, 0.08);
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.note b {
+  color: var(--warn);
+}
+.note .dim {
+  color: var(--dim);
 }
 
 /* ---------------- 账号行 ---------------- */

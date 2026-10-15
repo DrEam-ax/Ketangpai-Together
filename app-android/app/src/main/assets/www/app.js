@@ -164,6 +164,13 @@ function loadMonitor() {
   }
   sel.value = cur;
 
+  // 检查频率跟着原生侧的值走（服务重启后也不会跑偏）
+  const poll = $("#poll");
+  const wantMs = String(r.pollMs || 10000);
+  if ([...poll.options].some((o) => o.value === String(Number(wantMs) / 1000))) {
+    poll.value = String(Number(wantMs) / 1000);
+  }
+
   const when = r.lastCheckAt
     ? new Date(r.lastCheckAt).toLocaleTimeString("zh-CN", { hour12: false })
     : null;
@@ -191,6 +198,13 @@ $("#primary").addEventListener("change", (e) => {
   native.setPrimary(e.target.value);
   const name = e.target.selectedOptions[0]?.textContent ?? "";
   log(e.target.value ? `主成员已设为「${name}」` : "已取消主成员", "ok");
+  loadMonitor();
+});
+
+$("#poll").addEventListener("change", (e) => {
+  const sec = Number(e.target.value);
+  native.setPollSeconds(sec);
+  log(`检查频率已改为 ${sec} 秒`, "ok");
   loadMonitor();
 });
 
