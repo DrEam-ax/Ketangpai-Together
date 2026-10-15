@@ -81,6 +81,10 @@ public class MainActivity extends Activity {
 
   private WebView web;
   private SharedPreferences prefs;
+  /** 定位：目前拿到的最好结果（按精度挑，不是按时间） */
+  private Location bestFix = null;
+  private long locateStartedAt = 0;
+  private LocationListener locListener = null;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -668,69 +672,161 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 读手机当前位置 —— 用来「站在教室里点一下」把教室坐标填上。
+     * 开始定位（异步）。
      *
-     * 优先用系统缓存的最后位置（同步、即时）；缓存为空就发一次单次定位请求，
-     * 让用户过两秒再点一次。这样不必为一个填表动作写一整套异步回调。
+     * 之前那版直接用 getLastKnownLocation，有两个坑（真机踩到了：读出来的位置偏了几百米）：
+     *   1. **缓存位置可能来自模拟定位**：装了影梭之类的改定位 App 时，
+     *      系统"最后已知位置"返回的就是那个假位置，而不是你的真实位置。
+     *   2. 我原来按「时间最新」挑，而网络定位往往又新又粗，
+     *      会把 GPS 更准的结果顶掉。现在改成**按精度挑（accuracy 越小越好）**。
+     *
+     * 现在改成主动申请一次定位更新（GPS + 网络同时听），并在返回里带上
+     * accuracy / provider / 是否模拟定位，让用户自己判断能不能用。
+     */
+    @JavascriptInterface
+    public String startLocating() {
+      try {
+        if (!locationAllowed()) {
+          requestPermissions(
+              new String[] {
+                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION
+              },
+              REQ_LOCATION);
+          return "{\"ok\":false,\"error\":\"正在申请定位权限，同意后再点一次\"}";
+        }
+        LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (lm == null) return "{\"ok\":false,\"error\":\"定位服务不可用\"}";
+
+        stopLocating();
+        bestFix = null;
+        locateStartedAt = System.currentTimeMillis();
+
+        locListener =
+            new LocationListener() {
+              @Override
+              public void onLocationChanged(Location l) {
+                if (l == null) return;
+                float a = l.hasAccuracy() ? l.getAccuracy() : 9999f;
+                float ba = bestFix != null && bestFix.hasAccuracy() ? bestFix.getAccuracy() : 9999f;
+                if (bestFix == null || a < ba) {
+                  bestFix = new Location(l);
+                }
+              }
+
+              @Override
+              public void onStatusChanged(String provider, int status, Bundle extras) {}
+
+              @Override
+              public void onProviderEnabled(String provider) {}
+
+              @Override
+              public void onProviderDisabled(String provider) {}
+            };
+
+        StringBuilder used = new StringBuilder();
+        for (String p :
+            new String[] {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+          try {
+            if (lm.isProviderEnabled(p)) {
+              lm.requestLocationUpdates(p, 800L, 0f, locListener, Looper.getMainLooper());
+              used.append(p).append(' ');
+            }
+          } catch (Exception ignored) {
+          }
+        }
+
+        // 20 秒后自动停，免得一直开着耗电
+        new Handler(Looper.getMainLooper())
+            .postDelayed(
+                new Runnable() {
+                  @Override
+                  public void run() {
+                    stopLocating();
+                  }
+                },
+                20000);
+
+        JSONObject out = new JSONObject();
+        out.put("ok", true);
+        out.put("providers", used.toString().trim());
+        out.put("gpsOn", lm.isProviderEnabled(LocationManager.GPS_PROVIDER));
+        return out.toString();
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+    }
+
+    private void stopLocating() {
+      LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+      if (lm != null && locListener != null) {
+        try {
+          lm.removeUpdates(locListener);
+        } catch (Exception ignored) {
+        }
+      }
+      locListener = null;
+    }
+
+    private static boolean isMockLocation(Location l) {
+      try {
+        if (Build.VERSION.SDK_INT >= 31) return l.isMock();
+        //noinspection deprecation
+        return l.isFromMockProvider();
+      } catch (Throwable t) {
+        return false;
+      }
+    }
+
+    /**
+     * 读当前拿到的定位结果。界面会反复调它（每 1.2 秒）直到精度够好或超时。
+     * 一直没拿到新结果时退回系统缓存，但会把 cached / mock 标出来。
      */
     @JavascriptInterface
     public String readCurrentLocation() {
       JSONObject out = new JSONObject();
       try {
-        if (!locationAllowed()) {
-          requestPermissions(
-              new String[] {
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-              },
-              REQ_LOCATION);
-          return "{\"ok\":false,\"error\":\"正在申请定位权限，同意后再点一次\"}";
-        }
-
         LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-        if (lm == null) return "{\"ok\":false,\"error\":\"定位服务不可用\"}";
+        Location best = bestFix;
+        boolean cached = false;
 
-        Location best = null;
-        for (String p :
-            new String[] {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-          try {
-            Location l = lm.getLastKnownLocation(p);
-            if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
-          } catch (Exception ignored) {
+        if (best == null && lm != null) {
+          // 退回系统缓存，但按精度挑（不是按时间）
+          for (String p :
+              new String[] {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+            try {
+              Location l = lm.getLastKnownLocation(p);
+              if (l == null) continue;
+              float a = l.hasAccuracy() ? l.getAccuracy() : 9999f;
+              float ba = best != null && best.hasAccuracy() ? best.getAccuracy() : 9999f;
+              if (best == null || a < ba) best = l;
+            } catch (Exception ignored) {
+            }
           }
+          cached = best != null;
         }
 
         if (best == null) {
-          try {
-            lm.requestSingleUpdate(
-                LocationManager.NETWORK_PROVIDER,
-                new LocationListener() {
-                  @Override
-                  public void onLocationChanged(Location location) {}
-
-                  @Override
-                  public void onStatusChanged(String provider, int status, Bundle extras) {}
-
-                  @Override
-                  public void onProviderEnabled(String provider) {}
-
-                  @Override
-                  public void onProviderDisabled(String provider) {}
-                },
-                Looper.getMainLooper());
-          } catch (Exception ignored) {
-          }
-          return "{\"ok\":false,\"error\":\"系统还没缓存位置，等 2 秒再点一次；或照抄高德里显示的坐标\"}";
+          return "{\"ok\":false,\"error\":\"还没拿到定位结果…\"}";
         }
 
         out.put("ok", true);
         out.put("lat", String.format(Locale.US, "%.6f", best.getLatitude()));
         out.put("lng", String.format(Locale.US, "%.6f", best.getLongitude()));
+        out.put("accuracy", best.hasAccuracy() ? Math.round(best.getAccuracy()) : -1);
         out.put("ageSec", (System.currentTimeMillis() - best.getTime()) / 1000);
+        out.put("provider", String.valueOf(best.getProvider()));
+        out.put("mock", isMockLocation(best));
+        out.put("cached", cached);
       } catch (Exception e) {
         return errJson(String.valueOf(e.getMessage()));
       }
       return out.toString();
+    }
+
+    @JavascriptInterface
+    public String stopLocatingNow() {
+      stopLocating();
+      return "{\"ok\":true}";
     }
 
     /** 用已保存的教室坐标给某个定位签到提交（界面上的「立即签到」按钮）。 */

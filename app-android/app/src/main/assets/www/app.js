@@ -257,16 +257,71 @@ $("#room-save").addEventListener("click", () => {
   loadMonitor();
 });
 
-$("#room-here").addEventListener("click", () => {
-  const r = JSON.parse(native.readCurrentLocation());
-  if (!r.ok) {
-    log(r.error || "读不到当前位置", "wa");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 读当前位置。
+ *
+ * 之前只读一次系统的「最后已知位置」，真机上读偏了几百米 —— 两个原因：
+ *   1. 那个位置**可能来自模拟定位**（装了影梭之类的改定位 App 时，
+ *      系统返回的就是它设的假点，而不是你的真实位置）
+ *   2. 网络定位常常又新又粗，原来"按时间取最新"会把 GPS 更准的结果顶掉
+ * 现在：主动申请一次定位更新，反复取（原生侧按**精度**挑最好的），
+ * 拿到 ±30 米以内就停；并明确标出「模拟定位」和「系统缓存」。
+ */
+$("#room-here").addEventListener("click", async () => {
+  const btn = $("#room-here");
+  const hint = $("#room-hint");
+  const s = JSON.parse(native.startLocating());
+  if (!s.ok) {
+    hint.textContent = s.error || "定位没启动起来";
     return;
   }
-  $("#room-lat").value = r.lat;
-  $("#room-lng").value = r.lng;
-  const age = r.ageSec > 60 ? `（${Math.round(r.ageSec / 60)} 分钟前的位置）` : "（刚刚）";
-  log(`读到当前位置 ${r.lat}, ${r.lng} ${age} —— 确认后点「保存坐标」`, "ok");
+  hint.textContent = s.gpsOn
+    ? `定位中…（${s.providers || "无可用 provider"}）`
+    : "⚠️ 手机的定位（GPS）是关着的，只能靠基站/WiFi 估算，误差可能几百米 —— 建议先打开定位";
+  btn.disabled = true;
+  btn.textContent = "定位中…";
+
+  let best = null;
+  for (let i = 0; i < 14; i++) {
+    await sleep(1200);
+    const r = JSON.parse(native.readCurrentLocation());
+    if (!r.ok) {
+      hint.textContent = `定位中… 已等 ${Math.round((i + 1) * 1.2)} 秒`;
+      continue;
+    }
+    best = r;
+    const bits = [r.accuracy >= 0 ? `精度 ±${r.accuracy} 米` : "精度未知", r.provider];
+    if (r.cached) bits.push("系统缓存");
+    hint.textContent = `已获得：${bits.join(" · ")}${r.mock ? "　⚠️ 来自模拟定位！" : ""}`;
+    if (!r.mock && r.accuracy >= 0 && r.accuracy <= 30) break;
+  }
+  native.stopLocatingNow();
+  btn.disabled = false;
+  btn.textContent = "读当前位置";
+
+  if (!best) {
+    hint.textContent = "拿不到定位结果 —— 到窗边或室外再试一次，或直接照抄高德的坐标";
+    return;
+  }
+
+  $("#room-lat").value = best.lat;
+  $("#room-lng").value = best.lng;
+
+  if (best.mock) {
+    hint.textContent +=
+      "\n⚠️ 这个位置是**模拟定位**（影梭之类设的假点），不是你的真实位置。\n要读真实位置：先去影梭里「停止模拟」或直接关掉它，再点一次「读当前位置」。";
+    log("⚠️ 读到的位置来自模拟定位 —— 很可能是影梭设的假点，不是你站的地方。", "wa");
+  } else if (best.accuracy > 50) {
+    hint.textContent += "\n精度还不够好（±" + best.accuracy + " 米）。到窗边/室外再点一次，或直接照抄高德的坐标。";
+  }
+  log(
+    `读到位置 ${best.lat}, ${best.lng}（精度 ±${best.accuracy} 米 · ${best.provider}${
+      best.cached ? " · 系统缓存" : ""
+    }）—— 确认后点「保存坐标」`,
+    best.mock ? "wa" : "ok",
+  );
 });
 
 $("#primary").addEventListener("change", (e) => {
