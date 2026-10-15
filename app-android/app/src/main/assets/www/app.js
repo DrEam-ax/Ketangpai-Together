@@ -122,7 +122,98 @@ function setAll(checked) {
 
 function count() {
   $("#count").textContent = `已选 ${state.keys.size} / ${state.accounts.length}`;
+  loadMonitor(); // 主成员下拉框跟着账号列表走
 }
+
+// ---------------------------------------------------------------- 签到提醒
+
+/**
+ * 刷新「签到提醒」卡片。
+ *
+ * 判断有没有课正在签到是原生侧做的（MonitorService），
+ * 依据是 getNotFinishAttenceStudent —— 实测它只返回进行中的签到，
+ * 建一个考勤立刻出现、overAttence 一结束立刻消失。
+ */
+function loadMonitor() {
+  if (!native) return;
+  let r;
+  try {
+    r = JSON.parse(native.getMonitor());
+  } catch {
+    return;
+  }
+  if (!r.ok) return;
+
+  const sel = $("#primary");
+  const cur = r.primary || "";
+  // 只重建选项（保留当前选择），避免每次轮询把用户正在操作的下拉框重置掉
+  const keys = [...sel.options].map((o) => o.value).join(",");
+  const want = ["", ...state.accounts.map((a) => a.key)].join(",");
+  if (keys !== want) {
+    sel.innerHTML = "";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "（未选择）";
+    sel.appendChild(none);
+    for (const a of state.accounts) {
+      const o = document.createElement("option");
+      o.value = a.key;
+      o.textContent = a.name || a.key;
+      sel.appendChild(o);
+    }
+  }
+  sel.value = cur;
+
+  const when = r.lastCheckAt
+    ? new Date(r.lastCheckAt).toLocaleTimeString("zh-CN", { hour12: false })
+    : null;
+  const lines = [];
+  lines.push(r.running ? "● 监控运行中" : "○ 未运行");
+  if (when) lines.push(`上次检查：${when}`);
+  if (r.status) lines.push(r.status);
+  if (r.running && !r.notifGranted) lines.push("⚠️ 没有通知权限，收不到提醒");
+
+  const el = $("#mon-status");
+  el.textContent = lines.join("\n");
+  el.classList.toggle("live", !!r.running);
+
+  const badge = $("#mon-badge");
+  if (r.running) {
+    const hit = (r.status || "").startsWith("发现正在签到");
+    badge.textContent = hit ? "正在签到！" : "监控中";
+    badge.style.color = hit ? "var(--danger)" : "var(--ok)";
+  } else {
+    badge.textContent = "";
+  }
+}
+
+$("#primary").addEventListener("change", (e) => {
+  native.setPrimary(e.target.value);
+  const name = e.target.selectedOptions[0]?.textContent ?? "";
+  log(e.target.value ? `主成员已设为「${name}」` : "已取消主成员", "ok");
+  loadMonitor();
+});
+
+$("#mon-start").addEventListener("click", () => {
+  const r = JSON.parse(native.startMonitor());
+  if (r.ok) {
+    log("已开启签到监控（前台服务，会有一条常驻通知）", "ok");
+  } else {
+    log(`开启失败：${r.error}`, "er");
+  }
+  setTimeout(loadMonitor, 600);
+});
+
+$("#mon-stop").addEventListener("click", () => {
+  native.stopMonitor();
+  log("已停止签到监控", "wa");
+  setTimeout(loadMonitor, 600);
+});
+
+// 监控状态定时刷新（服务是独立进程外的东西，页面只能轮询）
+setInterval(() => {
+  if (!document.hidden) loadMonitor();
+}, 3000);
 
 // ---------------------------------------------------------------- IP 策略
 
@@ -428,6 +519,7 @@ $("#imp-text").addEventListener("click", () => doImport($("#exp-out").value, "�
   }
   loadSettings();
   loadAccounts();
+  loadMonitor();
   if (state.accounts.length === 0) $("#addbox").open = true;
   log("就绪。点「扫一扫签到」对准二维码即可。");
 })();

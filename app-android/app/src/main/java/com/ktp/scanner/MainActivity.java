@@ -6,6 +6,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -62,6 +63,8 @@ public class MainActivity extends Activity {
       "Mozilla/5.0 (iPhone; CPU iPhone OS 18_3_1 like Mac OS X) AppleWebKit/605.1.15 "
           + "(KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.56(0x18003835) NetType/WIFI Language/zh_CN";
   private static final int REQ_SCAN = 1001;
+  private static final int REQ_NOTIF = 1002;
+  private static final String NOTIFICATION_PERMISSION = "android.permission.POST_NOTIFICATIONS";
   /** 与 style.css 里的 --bg 保持一致，用于状态栏/导航栏区域 */
   private static final int PAGE_BG = 0xFF0F1116;
 
@@ -246,6 +249,12 @@ public class MainActivity extends Activity {
 
   private String ipMode() {
     return prefs.getString("ipMode", MODE_PER_ACCOUNT);
+  }
+
+  /** 通知权限是否已给（Android 13 以下默认给）。 */
+  private boolean notificationsAllowed() {
+    if (Build.VERSION.SDK_INT < 33) return true;
+    return checkSelfPermission(NOTIFICATION_PERMISSION) == PackageManager.PERMISSION_GRANTED;
   }
 
   /** 给这次请求挑一个 IP；返回 null 表示不发送 X-Forwarded-For。 */
@@ -576,6 +585,64 @@ public class MainActivity extends Activity {
       }
     }
 
+    // ------------------------------------------------------------ 签到提醒
+
+    /**
+     * 读监控状态：主成员是谁、服务在不在跑、上次检查说了什么。
+     *
+     * 判断「有没有课正在签到」的依据见 MonitorService 的注释 ——
+     * 用的是 getNotFinishAttenceStudent，实测它只返回进行中的签到。
+     */
+    @JavascriptInterface
+    public String getMonitor() {
+      JSONObject out = new JSONObject();
+      try {
+        out.put("ok", true);
+        out.put("primary", prefs.getString("primaryKey", ""));
+        out.put("running", MonitorService.running);
+        out.put("status", MonitorService.lastStatus);
+        out.put("lastCheckAt", MonitorService.lastCheckAt);
+        out.put("notifGranted", notificationsAllowed());
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+      return out.toString();
+    }
+
+    @JavascriptInterface
+    public String setPrimary(String key) {
+      prefs.edit().putString("primaryKey", key == null ? "" : key).apply();
+      return "{\"ok\":true}";
+    }
+
+    @JavascriptInterface
+    public String startMonitor() {
+      try {
+        String primary = prefs.getString("primaryKey", "");
+        if (primary == null || primary.isEmpty()) {
+          return "{\"ok\":false,\"error\":\"请先选择主成员\"}";
+        }
+        if (!notificationsAllowed()) {
+          // Android 13+ 需要运行时授权，否则通知会被静默丢掉
+          requestPermissions(new String[] {NOTIFICATION_PERMISSION}, REQ_NOTIF);
+        }
+        MonitorService.start(MainActivity.this);
+        return "{\"ok\":true}";
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+    }
+
+    @JavascriptInterface
+    public String stopMonitor() {
+      try {
+        MonitorService.stop(MainActivity.this);
+        return "{\"ok\":true}";
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+    }
+
     /** 读 IP 策略 + 每个账号的假 IP（界面上展示用）。 */
     @JavascriptInterface
     public String getSettings() {
@@ -740,6 +807,10 @@ public class MainActivity extends Activity {
   // ================================================================= HTTP
 
   private JSONObject post(String path, JSONObject body, String token, String ip) throws Exception {
+    return KtpApi.call(path, body, token, ip);
+  }
+
+  private JSONObject postLegacy(String path, JSONObject body, String token, String ip) throws Exception {
     HttpURLConnection conn = (HttpURLConnection) new URL(API + path).openConnection();
     try {
       conn.setRequestMethod("POST");

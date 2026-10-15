@@ -40,6 +40,17 @@ const MOCK = `
     removeAccount: () => '{"ok":true}',
     addAccount: () => '{"ok":true,"name":"测试","school":"测试大学"}',
     startScan: () => {},
+    getMonitor: () => JSON.stringify({
+      ok: true,
+      primary: "a",
+      running: true,
+      status: "正常 · 28 门课都没有在签到",
+      lastCheckAt: Date.now(),
+      notifGranted: true,
+    }),
+    setPrimary: () => '{"ok":true}',
+    startMonitor: () => '{"ok":true}',
+    stopMonitor: () => '{"ok":true}',
     submitQr: (keys, tid, exp) => JSON.stringify({
       okCount: 4,
       results: [
@@ -155,6 +166,14 @@ const FRAME = `<!doctype html>
       })
     };
     new Image().src = "http://127.0.0.1:8899/diag?d=" + encodeURIComponent(JSON.stringify(out));
+
+    // 滚到「签到提醒」卡片，方便截图看它的布局
+    if (window.location.hash === "#monitor") {
+      var card = d.querySelectorAll(".card")[1];
+      if (card) w.scrollTo(0, card.getBoundingClientRect().top + w.scrollY - 60);
+    } else {
+      w.scrollTo(0, 0);
+    }
   });
 <\/script>
 </body></html>`;

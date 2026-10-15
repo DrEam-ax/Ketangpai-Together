@@ -29,6 +29,24 @@
         <div id="result"></div>
       </div>
 
+      <!-- ===== 签到提醒 ===== -->
+      <div class="card">
+        <div class="head">
+          <span class="ttl">签到提醒</span>
+          <span class="count" id="mon-badge"></span>
+        </div>
+        <div class="stack">
+          <div class="dim small">选一个人当「主成员」，他/她的课一旦有人在签到，手机就弹通知。</div>
+          <select id="primary"></select>
+          <div class="row2">
+            <button id="mon-start">开始监控</button>
+            <button id="mon-stop" class="ghost">停止</button>
+          </div>
+          <div class="tip pre" id="mon-status"></div>
+          <div class="dim small">上课时打开，下课后记得关掉（一次检查要问 28 门课，比较费流量）。</div>
+        </div>
+      </div>
+
       <!-- ===== 添加账号 ===== -->
       <div class="card">
         <details id="addbox">

@@ -110,6 +110,15 @@ main {
   margin: 8px 0 0;
   text-align: center;
 }
+/* 需要保留换行的提示（监控状态是多行） */
+.tip.pre {
+  white-space: pre-line;
+  text-align: left;
+}
+/* 监控正在跑时给个视觉标记 */
+.tip.live {
+  color: var(--ok);
+}
 
 /* ---------------- 账号行 ---------------- */
 
