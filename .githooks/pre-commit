@@ -1,0 +1,11 @@
+#!/bin/sh
+# 隐私门禁：提交前自动扫一遍暂存的文件，命中真实姓名/IP/手机号/课堂派 ID 就挡住。
+#
+# 安装（每个克隆只需做一次）：
+#   git config core.hooksPath .githooks
+#
+# 自己的姓名之类的私有词，写到仓库根目录的 privacy.local.txt（已在 .gitignore）。
+set -e
+FILES=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$FILES" ] && exit 0
+exec node tools/privacy-scan.mjs $FILES

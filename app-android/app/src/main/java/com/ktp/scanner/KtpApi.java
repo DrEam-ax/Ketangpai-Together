@@ -26,7 +26,7 @@ final class KtpApi {
   /** 微信的 UA —— 课堂派按这个识别客户端，换别的可能被风控。 */
   static final String UA =
       "Mozilla/5.0 (Linux; Android 14; zh-cn) AppleWebKit/537.36 (KHTML, like Gecko) "
-          + "Version/4.0 Chrome/122.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.49.2600";
+          + "Version/4.0 Chrome/122.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.49.2600";  // privacy-scan:allow（假数据/版本号误报）
 
   private KtpApi() {}
 
@@ -168,3 +168,4 @@ final class KtpApi {
     return token;
   }
 }
+

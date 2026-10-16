@@ -14,6 +14,7 @@
     "watch": "node src/cli.ts watch",
     "courses": "node src/cli.ts courses",
     "whoami": "node src/cli.ts whoami",
+    "privacy": "node tools/privacy-scan.mjs",
     "demo": "node tools/demo.ts create",
     "demo:clean": "node tools/demo.ts clean",
     "demo:list": "node tools/demo.ts list"

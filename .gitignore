@@ -1,7 +1,8 @@
 # 依赖
 node_modules/
 
-# 本地账号 / token —— 绝对不要提交
+# 本地账号 / token / 私有词表 —— 绝对不要提交
+privacy.local.txt
 config.local.json
 .cache/
 *.local.json

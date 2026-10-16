@@ -17,7 +17,7 @@ const CASES = [
       ts: 1700000000,
       withSecrets: true,
       accounts: [
-        { key: "a", email: "13800138000", password: "fake-pass-123", name: "某同学", school: "某大学", ip: "203.0.113.11" },
+        { key: "a", email: "13800138000", password: "fake-pass-123", name: "某同学", school: "某大学", ip: "203.0.113.11" },  // privacy-scan:allow（假数据/版本号误报）
       ],
     },
   },
@@ -29,7 +29,7 @@ const CASES = [
       ts: 1700000001,
       withSecrets: true,
       accounts: [
-        { key: "b c", email: "138 0013 8000", password: "my pass word", name: "张 三 丰", school: "某某 大学", ip: "203.0.113.12" },
+        { key: "b c", email: "138 0013 8000", password: "my pass word", name: "张 三 丰", school: "某某 大学", ip: "203.0.113.12" },  // privacy-scan:allow（假数据/版本号误报）
       ],
     },
   },
@@ -40,7 +40,7 @@ const CASES = [
       app: "ktp",
       ts: 1700000002,
       withSecrets: false,
-      accounts: [{ key: "x", email: "1", name: "甲", school: "乙", ip: "1.2.3.4" }],
+      accounts: [{ key: "x", email: "1", name: "甲", school: "乙", ip: "198.51.100.4" }],
     },
   },
 ];
@@ -118,3 +118,5 @@ for (const bad of ["", "hello world", "KTP1:!!!!"]) {
 
 console.log(fail === 0 ? "\nALL PASS" : `\nFAILED: ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
+
+
