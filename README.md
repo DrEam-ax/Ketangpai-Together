@@ -388,3 +388,73 @@ cd app-android
   （已在 `.gitignore`）。
 - 联调脚本会在课程里创建并删除考勤记录。请在**自己的测试课程**里跑，别在真实课程里试。
 - App 里的账号密码只存在本机 `SharedPreferences`，没有任何上传行为。
+
+---
+
+## 十、隐私与凭据
+
+这个仓库是**公开**的，而开发时非常容易顺手把真实信息写进去 —— 我们真的犯过：
+真实姓名、真实课程名、真实学校、真实出口 IP、真实教室坐标（连 App 输入框的
+placeholder 都是），甚至一张手机实拍的照片。
+
+**关键教训：一旦提交并推送，光删文件是不够的 —— 历史里还在，必须重写历史。**
+
+### 提交前自动检查（建议每个克隆都装一次）
+
+```bash
+npm run privacy                        # 手动扫全仓
+git config core.hooksPath .githooks    # 装钩子，之后每次 commit 自动扫
+```
+
+`tools/privacy-scan.mjs` 会拦：
+
+| 类型 | 说明 |
+|---|---|
+| 真实公网 IP | 只放行 RFC 5737 文档保留段（`203.0.113.x`）和私有段 |
+| 手机号 | 课堂派账号就是手机号 |
+| 课堂派内部 ID | `MDAwMDAwMDAwML` 开头，能定位到具体课程/账号 |
+| 明文口令 | `password: "..."` 这种 |
+| 不该提交的文件 | `config.local.json`、`.cache/`、签名密钥、编译产物 |
+
+**你自己的私有词**（姓名、学校、手机号、教室坐标）写到仓库根目录的
+`privacy.local.txt`，每行一个，`#` 开头是注释。这个文件在 `.gitignore` 里，
+**永远不会被提交**，所以可以放心写。
+
+某一行的误报（例如 UA 里的 `Chrome/122.0.0.0`）加 `// privacy-scan:allow` 即可豁免。
+另外：**截图、照片这类素材要特别小心** —— 文本扫描看不出图里的内容，而且
+APK/zip 里是压缩的，原始字节扫描也搜不到，必须解包再查。
+
+### 万一已经提交了
+
+改文件没用，历史里还在。流程是：
+
+```bash
+# 1) 先备份，出事能恢复
+git bundle create ../backup.bundle --all
+
+# 2) 用 tree-filter 把每个提交里的敏感串替换掉（顺便删掉不该入库的二进制）
+git -c core.autocrlf=false filter-branch -f \
+    --tree-filter 'node /path/to/scrub.mjs' -- --all
+
+# 3) 清掉 filter-branch 留下的旧引用并回收，否则旧对象还留在本地
+git for-each-ref --format='%(refname)' refs/original | xargs -n1 git update-ref -d
+git reflog expire --expire=now --all && git gc --prune=now
+
+# 4) 强推（--force-with-lease 比 --force 安全）
+git push --force-with-lease
+```
+
+**判断"真的清干净了"的唯一可靠办法**是直接去公网取：
+
+```bash
+curl -sI https://raw.githubusercontent.com/<user>/<repo>/<旧SHA>/README.md
+# 404 = 已不可达；200 = 那个提交还在，数据仍暴露
+```
+
+⚠️ 强推之后，**旧提交在 GitHub 侧仍能按 SHA 取一段时间**（GitHub 不会立即回收
+不可达对象，我们实测重写 4 次后仍有 4 个旧 SHA 可访问）。要做到 100% 干净只能：
+
+1. **删掉仓库重建**（最彻底，顺带清掉 push 事件流），或
+2. 按 GitHub 官方「移除敏感数据」流程联系 Support 请他们执行 GC
+
+> 重写历史会改变所有提交的 SHA，别人如果克隆过就需要重新克隆。
