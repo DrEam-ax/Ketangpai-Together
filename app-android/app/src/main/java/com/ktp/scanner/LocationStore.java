@@ -46,40 +46,85 @@ final class LocationStore {
     return null;
   }
 
-  /** 新增或覆盖同名位置，并自动设为生效。 */
-  static void add(SharedPreferences prefs, String name, String lat, String lng) throws Exception {
-    String n = name == null ? "" : name.trim();
-    if (n.isEmpty()) throw new Exception("备注名不能为空");
-    if (n.length() > MAX_NAME) throw new Exception("备注名最长 " + MAX_NAME + " 个字");
-    if (n.contains("|")) throw new Exception("备注名不能包含 | 符号");
-
-    double la = Double.parseDouble(String.valueOf(lat).trim());
-    double ln = Double.parseDouble(String.valueOf(lng).trim());
-    if (la < -90 || la > 90 || ln < -180 || ln > 180) throw new Exception("坐标超出范围");
+  /**
+   * 新建一个位置（并设为生效）。
+   *
+   * 名字已存在时**报错而不是覆盖** —— 界面上的「回填」就是用来改已有位置坐标的，
+   * 两个动作要分得清；否则「新建」会静默覆盖同名位置，用户会莫名其妙。
+   */
+  static void addNew(SharedPreferences prefs, String name, String lat, String lng) throws Exception {
+    String n = checkName(name);
+    double[] c = checkCoords(lat, lng);
 
     JSONArray arr = list(prefs);
     JSONArray out = new JSONArray();
-    boolean replaced = false;
     for (int i = 0; i < arr.length(); i++) {
       JSONObject o = arr.optJSONObject(i);
       if (o == null) continue;
       if (n.equals(o.optString("name"))) {
-        replaced = true;
+        throw new Exception("已经有叫「" + n + "」的位置了 —— 要改坐标请用「回填」，或者换个名字");
+      }
+      out.put(o);
+    }
+    if (out.length() >= MAX_COUNT) throw new Exception("最多存 " + MAX_COUNT + " 个位置");
+    out.put(make(n, c[0], c[1]));
+
+    prefs.edit().putString(KEY_LIST, out.toString()).putString(KEY_ACTIVE, n).apply();
+  }
+
+  /**
+   * 回填：用输入框里的坐标替换**指定位置**的坐标（名字不变），并设为生效。
+   * 位置不存在时报错，避免「以为改了其实没改」。
+   */
+  static void refill(SharedPreferences prefs, String name, String lat, String lng) throws Exception {
+    String n = checkName(name);
+    double[] c = checkCoords(lat, lng);
+
+    JSONArray arr = list(prefs);
+    JSONArray out = new JSONArray();
+    boolean found = false;
+    for (int i = 0; i < arr.length(); i++) {
+      JSONObject o = arr.optJSONObject(i);
+      if (o == null) continue;
+      if (n.equals(o.optString("name"))) {
+        out.put(make(n, c[0], c[1]));
+        found = true;
       } else {
         out.put(o);
       }
     }
-    if (!replaced && out.length() >= MAX_COUNT) {
-      throw new Exception("最多存 " + MAX_COUNT + " 个位置");
-    }
-
-    JSONObject item = new JSONObject();
-    item.put("name", n);
-    item.put("lat", String.format(java.util.Locale.US, "%.6f", la));
-    item.put("lng", String.format(java.util.Locale.US, "%.6f", ln));
-    out.put(item);
+    if (!found) throw new Exception("找不到位置「" + n + "」，它可能已经被删了");
 
     prefs.edit().putString(KEY_LIST, out.toString()).putString(KEY_ACTIVE, n).apply();
+  }
+
+  private static String checkName(String name) throws Exception {
+    String n = name == null ? "" : name.trim();
+    if (n.isEmpty()) throw new Exception("备注名不能为空");
+    if (n.length() > MAX_NAME) throw new Exception("备注名最长 " + MAX_NAME + " 个字");
+    if (n.contains("|")) throw new Exception("备注名不能包含 | 符号");
+    return n;
+  }
+
+  private static double[] checkCoords(String lat, String lng) throws Exception {
+    double la;
+    double ln;
+    try {
+      la = Double.parseDouble(String.valueOf(lat).trim());
+      ln = Double.parseDouble(String.valueOf(lng).trim());
+    } catch (Exception e) {
+      throw new Exception("经纬度要填数字");
+    }
+    if (la < -90 || la > 90 || ln < -180 || ln > 180) throw new Exception("坐标超出范围");
+    return new double[] {la, ln};
+  }
+
+  private static JSONObject make(String name, double lat, double lng) throws Exception {
+    JSONObject item = new JSONObject();
+    item.put("name", name);
+    item.put("lat", String.format(java.util.Locale.US, "%.6f", lat));
+    item.put("lng", String.format(java.util.Locale.US, "%.6f", lng));
+    return item;
   }
 
   static void remove(SharedPreferences prefs, String name) {

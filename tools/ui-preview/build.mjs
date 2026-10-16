@@ -32,6 +32,13 @@ const ACCOUNTS = [
 const MOCK = `
 <script>
   const ACCOUNTS = ${JSON.stringify(ACCOUNTS)};
+  // 位置库的假数据（有状态）
+  var LOCS = [
+    { name: "二教305", lat: "39.904200", lng: "116.407400" },
+    { name: "宿舍", lat: "39.910000", lng: "116.420000" },
+    { name: "一个特别长的位置名字测试", lat: "39.908700", lng: "116.397500" },
+  ];
+  var ACTIVE = "二教305";
   window.Android = {
     listAccounts: () => JSON.stringify(ACCOUNTS),
     getSettings: () => JSON.stringify({ mode: "perAccount", sharedIp: "", accounts: ACCOUNTS }),
@@ -59,14 +66,32 @@ const MOCK = `
     setPrimary: () => '{"ok":true}',
     setPollSeconds: () => '{"ok":true}',
     setRoomLocation: () => '{"ok":true}',
-    listLocations: () => JSON.stringify({ ok: true, active: "二教305", locations: [
-      { name: "二教305", lat: "39.904200", lng: "116.407400" },
-      { name: "宿舍", lat: "39.910000", lng: "116.420000" },
-      { name: "一个特别长的位置名字测试", lat: "39.908700", lng: "116.397500" },
-    ] }),
-    addLocation: () => '{"ok":true}',
-    removeLocation: () => '{"ok":true}',
-    useLocation: () => '{"ok":true}',
+    // 位置库做**有状态**的假实现 —— 这样交互验证（#loctest）才有意义：
+    // 选中/新建/回填/删除之后，listLocations 会返回更新后的数据。
+    listLocations: () => JSON.stringify({ ok: true, active: ACTIVE, locations: LOCS }),
+    addLocation: (n, la, ln) => {
+      if (LOCS.some((x) => x.name === n)) return '{"ok":false,"error":"已经有叫「' + n + '」的位置了"}';
+      LOCS.push({ name: n, lat: la, lng: ln });
+      ACTIVE = n;
+      return '{"ok":true}';
+    },
+    refillLocation: (n, la, ln) => {
+      const o = LOCS.find((x) => x.name === n);
+      if (!o) return '{"ok":false,"error":"找不到位置"}';
+      o.lat = la;
+      o.lng = ln;
+      ACTIVE = n;
+      return '{"ok":true}';
+    },
+    removeLocation: (n) => {
+      LOCS = LOCS.filter((x) => x.name !== n);
+      if (ACTIVE === n) ACTIVE = "";
+      return '{"ok":true}';
+    },
+    useLocation: (n) => {
+      ACTIVE = n;
+      return '{"ok":true}';
+    },
     readCurrentLocation: () => JSON.stringify({ ok: true, lat: "39.904200", lng: "116.407400", accuracy: 12, ageSec: 2, provider: "gps", mock: false, cached: false }),
     startLocating: () => JSON.stringify({ ok: true, providers: "gps network", gpsOn: true }),
     stopLocatingNow: () => '{"ok":true}',
@@ -233,6 +258,54 @@ const FRAME = `<!doctype html>
       if (ts) ts.click();
       var delAcc = d.querySelectorAll("#accounts button[data-x]");
       if (delAcc.length) delAcc[0].click();
+      out.calls = w.__calls || [];
+    }
+
+    // ==== 交互验证（#loctest）：验证这次改的三条行为
+    //   1) 点行内任意位置（不是 radio）也能选中
+    //   2) 选中后经纬度输入框被自动填入
+    //   3) 「新建」建新位置、「回填」改当前选中位置的坐标
+    if (window.location.hash === "#loctest") {
+      var tg2 = d.querySelector('#tabbar .tab[data-tab="gps"]');
+      if (tg2) tg2.click();
+      var lb2 = d.getElementById("locbox");
+      if (lb2) lb2.open = true;
+
+      // ① 点第 2 行的文字区域（不是 radio）
+      var rows = d.querySelectorAll("#locations .acc");
+      out.rows = rows.length;
+      var picked = null;
+      if (rows.length > 1) {
+        var target = rows[1].querySelector(".nm").textContent;
+        rows[1].querySelector(".who").click();
+        picked = target;
+      }
+      out.pickedByName = picked;
+      out.activeAfterClick = d.querySelector("#locations input[data-use]:checked")
+        ? d.querySelector("#locations input[data-use]:checked").dataset.use
+        : "";
+      out.latInput = d.getElementById("loc-lat").value;
+      out.lngInput = d.getElementById("loc-lng").value;
+
+      // ② 新建：填名字 + 坐标，点「新建」
+      d.getElementById("loc-name").value = "三教101";
+      d.getElementById("loc-lat").value = "31.990000";
+      d.getElementById("loc-lng").value = "120.880000";
+      d.getElementById("loc-new").click();
+      out.afterNew = d.querySelectorAll("#locations .acc").length;
+      out.activeAfterNew = d.querySelector("#locations input[data-use]:checked")
+        ? d.querySelector("#locations input[data-use]:checked").dataset.use
+        : "";
+
+      // ③ 回填：改输入框的坐标，点「回填」，看列表里那条的坐标有没有变
+      d.getElementById("loc-lat").value = "31.111111";
+      d.getElementById("loc-lng").value = "121.222222";
+      d.getElementById("loc-fill").click();
+      var back = JSON.parse(w.Android.listLocations());
+      var hit = (back.locations || []).filter(function (x) {
+        return x.lat === "31.111111" && x.lng === "121.222222";
+      });
+      out.refilledName = hit.length ? hit[0].name : "";
       out.calls = w.__calls || [];
     }
 

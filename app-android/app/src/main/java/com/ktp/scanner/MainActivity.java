@@ -699,10 +699,22 @@ public class MainActivity extends Activity {
       return out.toString();
     }
 
+    /** 新建位置（名字重复会报错，改坐标请用 refillLocation）。 */
     @JavascriptInterface
     public String addLocation(String name, String lat, String lng) {
       try {
-        LocationStore.add(prefs, name, lat, lng);
+        LocationStore.addNew(prefs, name, lat, lng);
+        return "{\"ok\":true}";
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
+    }
+
+    /** 回填：用输入框的坐标替换指定位置的坐标（名字不变）。 */
+    @JavascriptInterface
+    public String refillLocation(String name, String lat, String lng) {
+      try {
+        LocationStore.refill(prefs, name, lat, lng);
         return "{\"ok\":true}";
       } catch (Exception e) {
         return errJson(String.valueOf(e.getMessage()));

@@ -315,9 +315,19 @@ document.querySelectorAll("#tabbar .tab").forEach((b) =>
 
 // ---------------------------------------------------------------- 签到位置库
 
-/** 上次「读当前位置」拿到的结果，供两套坐标的选用按钮使用 */
+/** 上次「读当前位置」拿到的结果（两套坐标都在里面），给「换成另一套坐标」用 */
 let lastFix = null;
+/** 当前读出来的这组坐标用的是哪套：'gcj' 还是 'wgs' */
+let fixKind = "gcj";
 
+/**
+ * 画位置列表。
+ *
+ * 整行是 <label>，所以**点框内任意位置都能选中**（和成员列表一样的做法）。
+ * 选中时把该位置的经纬度**回填到下面的输入框**，方便看清楚当前生效的是哪组坐标；
+ * 但反过来改输入框**不会**动已存的位置 —— 要让改动生效得点「回填」。
+ * 这样输入框就是个"草稿区"，不会误改数据。
+ */
 function loadLocations() {
   let r;
   try {
@@ -335,7 +345,7 @@ function loadLocations() {
   }
   for (const loc of list) {
     const on = loc.name === r.active;
-    const el = document.createElement("div");
+    const el = document.createElement("label");
     el.className = "acc" + (on ? " checked" : "");
     el.innerHTML =
       `<input type="radio" name="loc" data-use="${esc(loc.name)}" ${on ? "checked" : ""} />` +
@@ -345,15 +355,30 @@ function loadLocations() {
       `<button class="x" data-del="${esc(loc.name)}" title="删除">×</button>`;
     box.appendChild(el);
   }
+
+  const select = (name) => {
+    native.useLocation(name);
+    const loc = list.find((x) => x.name === name);
+    if (loc) {
+      // 选中即回填到草稿区 —— 但改输入框不会反向改位置
+      $("#loc-lat").value = loc.lat;
+      $("#loc-lng").value = loc.lng;
+      $("#loc-name").value = "";
+      $("#loc-name").placeholder = `备注名（新建用；「回填」不需要）`;
+    }
+    log(`签到位置已切换为「${name}」，并把它的坐标填到了下面`, "ok");
+    loadLocations();
+  };
+
   box.querySelectorAll("input[data-use]").forEach((rb) =>
-    rb.addEventListener("change", () => {
-      native.useLocation(rb.dataset.use);
-      log(`签到位置已切换为「${rb.dataset.use}」`, "ok");
-      loadLocations();
-    }),
+    rb.addEventListener("change", () => select(rb.dataset.use)),
   );
+  // 整行可点：<label> 会自动勾选里面的 radio 并触发 change，这里不用额外处理。
+  // 但 × 在 label 里，要阻止它顺带触发选中。
   box.querySelectorAll("button[data-del]").forEach((b) =>
-    b.addEventListener("click", () => {
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       if (!confirm(`删除位置「${b.dataset.del}」？`)) return;
       native.removeLocation(b.dataset.del);
       log(`已删除位置「${b.dataset.del}」`, "wa");
@@ -372,18 +397,37 @@ function loadLocations() {
   }
 }
 
-$("#loc-save").addEventListener("click", () => {
+/** 新建：用「备注名 + 下面的经纬度」建一个新位置。 */
+$("#loc-new").addEventListener("click", () => {
   const name = $("#loc-name").value.trim();
   const lat = $("#loc-lat").value.trim();
   const lng = $("#loc-lng").value.trim();
-  if (!name) return log("先填个备注名（比如「二教305」）", "wa");
+  if (!name) return log("「新建」要先填个备注名（比如「二教305」）", "wa");
   if (!lat || !lng) return log("经纬度都要填", "wa");
   const r = JSON.parse(native.addLocation(name, lat, lng));
-  if (!r.ok) return log(`保存失败：${r.error}`, "er");
-  log(`位置「${name}」已保存，并已设为生效（${lat}, ${lng}）`, "ok");
+  if (!r.ok) return log(`新建失败：${r.error}`, "er");
+  log(`已新建位置「${name}」并设为生效（${lat}, ${lng}）`, "ok");
   $("#loc-name").value = "";
   loadLocations();
 });
+
+/** 回填：把下面的经纬度写回**当前选中**的那个位置（名字不变）。 */
+$("#loc-fill").addEventListener("click", () => {
+  const active = currentActiveName();
+  if (!active) return log("先在上面选一个位置，再点「回填」", "wa");
+  const lat = $("#loc-lat").value.trim();
+  const lng = $("#loc-lng").value.trim();
+  if (!lat || !lng) return log("经纬度都要填", "wa");
+  const r = JSON.parse(native.refillLocation(active, lat, lng));
+  if (!r.ok) return log(`回填失败：${r.error}`, "er");
+  log(`已把「${active}」的坐标改成 ${lat}, ${lng}`, "ok");
+  loadLocations();
+});
+
+function currentActiveName() {
+  const checked = document.querySelector("#locations input[data-use]:checked");
+  return checked ? checked.dataset.use : "";
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -400,8 +444,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 $("#loc-here").addEventListener("click", async () => {
   const btn = $("#loc-here");
   const hint = $("#loc-hint");
-  const pick = $("#loc-pick");
-  pick.style.display = "none";
+  const swap = $("#loc-swap");
+  swap.style.display = "none";
   lastFix = null;
 
   const s = JSON.parse(native.startLocating());
@@ -438,42 +482,44 @@ $("#loc-here").addEventListener("click", async () => {
     return;
   }
   lastFix = best;
+  fixKind = "gcj"; // 默认按「课堂派用高德坐标系」填，国产 App 绝大多数如此
+  applyFix();
+  swap.style.display = "grid";
+});
+
+/** 把 lastFix 按 fixKind 填进输入框，并刷新说明文字。 */
+function applyFix() {
+  if (!lastFix) return;
+  const hint = $("#loc-hint");
+  const isGcj = fixKind === "gcj";
+  $("#loc-lat").value = isGcj ? lastFix.latGcj : lastFix.lat;
+  $("#loc-lng").value = isGcj ? lastFix.lngGcj : lastFix.lng;
 
   const lines = [];
-  lines.push(`手机读到（WGS-84 GPS）：${best.lat}, ${best.lng}`);
-  lines.push(`换算成高德坐标（GCJ-02）：${best.latGcj}, ${best.lngGcj}`);
-  lines.push(`两者相差 ${best.offsetMeters} 米`);
+  lines.push(`手机读到（WGS-84 GPS）：${lastFix.lat}, ${lastFix.lng}`);
+  lines.push(`换算成高德坐标（GCJ-02）：${lastFix.latGcj}, ${lastFix.lngGcj}`);
+  lines.push(`两者相差 ${lastFix.offsetMeters} 米`);
   lines.push("");
-  lines.push("用哪个？ 在高德里长按教室看它显示的坐标，和哪一组一样就用哪一组。");
-  if (best.mock) {
+  lines.push(
+    `当前填的是【${isGcj ? "高德坐标 GCJ-02" : "GPS 原始坐标 WGS-84"}】。\n` +
+      `不确定用哪套？在高德里长按教室看它显示的坐标，和上面哪一行一样就用哪套。`,
+  );
+  if (lastFix.mock) {
     lines.push("");
     lines.push("⚠️ 这次读到的位置来自**模拟定位**（影梭之类），不是真实位置。");
-  } else if (best.accuracy > 50) {
+  } else if (lastFix.accuracy > 50) {
     lines.push("");
-    lines.push(`⚠️ 精度一般（±${best.accuracy} 米），到窗边/室外再点一次会更准。`);
+    lines.push(`⚠️ 精度一般（±${lastFix.accuracy} 米），到窗边/室外再点一次会更准。`);
   }
   hint.textContent = lines.join("\n");
-  pick.style.display = "grid";
+  $("#loc-swap-btn").textContent = isGcj ? "换成 GPS 原始坐标" : "换成高德坐标";
+}
 
-  // 默认按「课堂派用高德坐标系」预填（国产 App 的绝大多数情况），用户可以改用另一组
-  $("#loc-lat").value = best.latGcj;
-  $("#loc-lng").value = best.lngGcj;
-  if (!$("#loc-name").value) $("#loc-name").value = "当前位置";
-  log(`读到位置：WGS-84 ${best.lat}, ${best.lng} ／ GCJ-02 ${best.latGcj}, ${best.lngGcj}`, "ok");
-});
-
-$("#loc-use-wgs").addEventListener("click", () => {
+$("#loc-swap-btn").addEventListener("click", () => {
   if (!lastFix) return;
-  $("#loc-lat").value = lastFix.lat;
-  $("#loc-lng").value = lastFix.lng;
-  log("已填入 GPS 原始坐标（WGS-84）", "ok");
-});
-
-$("#loc-use-gcj").addEventListener("click", () => {
-  if (!lastFix) return;
-  $("#loc-lat").value = lastFix.latGcj;
-  $("#loc-lng").value = lastFix.lngGcj;
-  log("已填入高德坐标（GCJ-02）", "ok");
+  fixKind = fixKind === "gcj" ? "wgs" : "gcj";
+  applyFix();
+  log(`已填入${fixKind === "gcj" ? "高德坐标（GCJ-02）" : "GPS 原始坐标（WGS-84）"}`, "ok");
 });
 
 
