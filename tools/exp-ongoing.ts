@@ -13,7 +13,14 @@ import { KtpClient } from "../src/client.ts";
 import { getCachedToken, loadConfig, resolveAccount, setCachedToken } from "../src/config.ts";
 
 const config = loadConfig();
-const courseid = process.argv[2] ?? "FAKEid0002";
+// ⚠️ 课程 ID 不再写死在仓库里（那是真实的课程，不该公开）。
+// 用法: node <本脚本> <courseid>    —— courseid 可以从 `node src/cli.ts courses` 里抄
+const courseid = process.argv[2];
+if (!courseid) {
+  console.error("用法: node " + process.argv[1] + " <courseid>");
+  console.error("（courseid 用 `node src/cli.ts courses` 查）");
+  process.exit(1);
+}
 
 async function makeClient(label: string, force = false): Promise<KtpClient> {
   if (!force) {

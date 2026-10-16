@@ -21,7 +21,7 @@
 
 打开 App，进 **设置 → 添加账号**，填**课堂派账号密码**（手机号即可）。
 
-- 备注名随便起（`小王`、`小明`…），只用于你自己认人
+- 备注名随便起（`小王`、`小李`…），只用于你自己认人
 - 点「添加并验证登录」——会**真实登录一次**，成功才保存
 - 加几个都行。**扫码签到时勾选谁，就替谁签**
 
@@ -260,10 +260,10 @@ X-Forwarded-For: <随机国内 IP>             # 多个账号同 IP 提交会被
 
 ```
 https://w.ketangpai.com/checkIn/checkinCodeResult
-  ?type=2&ticketid=FAKEid0001
+  ?type=2&ticketid=<ticketid>
   &expire=1791970516
-  &sign=0000000000000000000000000000000000000000
-  &courseid=...&randNum=DWDY4MPB
+  &sign=<sign>
+  &courseid=<courseid>&randNum=DWDY4MPB
 ```
 
 真正参与校验的只有 `ticketid`、`expire`、`sign`；`randNum` 只是防重复的随机数。

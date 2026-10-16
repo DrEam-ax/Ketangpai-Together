@@ -31,6 +31,10 @@ tools/ui-preview/diag.log
 tools/ui-preview/shot-*.png
 tools/ip-test/out/
 
+# 单测的编译产物
+tools/coord-test/out/
+tools/**/*.class
+
 # 图标生成的调试图（source.jpg 和 make_icons.py 要保留）
 tools/icon/check_*.png
 tools/icon/q_*.png
@@ -44,5 +48,5 @@ __pycache__/
 Thumbs.db
 desktop.ini
 
-# zxing-cpp ���ر��루Դ������ﶼ����⣩
+# zxing-cpp 本地编译（源码和产物都不提交，README 里有编译步骤）
 tools/zxing-cpp-build/

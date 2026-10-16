@@ -20,7 +20,9 @@ for (const f of ["style.css", "app.js"]) {
   fs.copyFileSync(path.join(SRC, f), path.join(OUT, f));
 }
 
-// 故意用长短不一的账号名，专门暴露"名字太长把行撑歪"
+// 故意用长短不一的账号名，专门暴露"名字太长把行撑歪"。
+// ⚠️ 这里必须是**编造的**假数据 —— 预览会截图，截图会进 issue/聊天，别把真实账号写进来。
+// IP 用 RFC 5737 的文档保留段（203.0.113.x / 198.51.100.x），一看就知道是假的。
 const ACCOUNTS = [
   { key: "a", name: "小明", school: "示例大学", ip: "203.0.113.11" },
   { key: "b", name: "小红", school: "示例大学", ip: "203.0.113.12" },
@@ -52,7 +54,7 @@ const MOCK = `
       ok: true,
       primary: "a",
       running: true,
-      status: "发现正在签到：软件工程；示例课程",
+      status: "发现正在签到：高等数学；大学英语",
       lastCheckAt: Date.now(),
       notifGranted: true,
       pollMs: 10000,
@@ -60,7 +62,7 @@ const MOCK = `
       roomLng: "116.407400",
       locationGranted: true,
       pending: [
-        { course: "软件工程", id: "att1", type: "2", title: "2026.10.14" },
+        { course: "高等数学", id: "att1", type: "2", title: "2026.10.14" },
         { course: "大学英语（名字很长很长很长很长）", id: "att2", type: "3", title: "2026.10.14" },
       ],
     }),
@@ -291,8 +293,8 @@ const FRAME = `<!doctype html>
 
       // ② 新建：填名字 + 坐标，点「新建」
       d.getElementById("loc-name").value = "三教101";
-      d.getElementById("loc-lat").value = "31.990000";
-      d.getElementById("loc-lng").value = "120.880000";
+      d.getElementById("loc-lat").value = "39.990000";
+      d.getElementById("loc-lng").value = "116.410000";
       d.getElementById("loc-new").click();
       out.afterNew = d.querySelectorAll("#locations .acc").length;
       out.activeAfterNew = d.querySelector("#locations input[data-use]:checked")
@@ -300,12 +302,12 @@ const FRAME = `<!doctype html>
         : "";
 
       // ③ 回填：改输入框的坐标，点「回填」，看列表里那条的坐标有没有变
-      d.getElementById("loc-lat").value = "31.111111";
-      d.getElementById("loc-lng").value = "121.222222";
+      d.getElementById("loc-lat").value = "39.111111";
+      d.getElementById("loc-lng").value = "116.222222";
       d.getElementById("loc-fill").click();
       var back = JSON.parse(w.Android.listLocations());
       var hit = (back.locations || []).filter(function (x) {
-        return x.lat === "31.111111" && x.lng === "121.222222";
+        return x.lat === "39.111111" && x.lng === "116.222222";
       });
       out.refilledName = hit.length ? hit[0].name : "";
       out.calls = w.__calls || [];

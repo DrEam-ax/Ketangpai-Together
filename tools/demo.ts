@@ -10,7 +10,7 @@
  *   digit 数字码考勤（type=1）—— 只需要别人把 4 位数字告诉你，人在哪都能签
  *   gps   定位签到（type=2）  —— 填对坐标就行
  *
- * 默认课程：示例课程。二维码/票据有效期 300 秒，考勤窗口 600 秒。
+ * 课程 ID 从命令行参数取。二维码/票据有效期 300 秒，考勤窗口 600 秒。
  */
 import { execFile } from "node:child_process";
 import fs from "node:fs";
@@ -29,7 +29,8 @@ import { parseQrTicket, secondsUntilExpire } from "../src/qr.ts";
 const execFileAsync = promisify(execFile);
 const ROOT = ROOT_DIR;
 const STATE_PATH = path.join(ROOT, ".cache", "demo-attence.json");
-const DEFAULT_COURSE = "FAKEid0002"; // 示例课程
+// ⚠️ 课程 ID 不写死在仓库里（那是真实课程）。用法: node tools/demo.ts <courseid>
+const DEFAULT_COURSE = process.argv[2] ?? process.env.KTP_COURSE ?? ";
 
 const CREATE_API: Record<string, string> = {
   qr: "/AttenceApi/addNowsAttance",

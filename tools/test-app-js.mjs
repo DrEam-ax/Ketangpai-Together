@@ -56,8 +56,8 @@ const CASES = [
   {
     name: "完整 URL（课堂派移动端扫码结果）",
     input:
-      "https://w.ketangpai.com/checkIn/checkinCodeResult?type=2&ticketid=FAKEid0003&expire=1791977025&sign=0000000000000000000000000000000000000000&courseid=FAKEid0002&randNum=HCAZGNWF",
-    expect: { ticketid: "FAKEid0003", expire: "1791977025", sign: "0000000000000000000000000000000000000000" },
+      "https://w.ketangpai.com/checkIn/checkinCodeResult?type=2&ticketid=FAKEticket0000000000000001&expire=1791977025&sign=0000000000000000000000000000000000000000&courseid=FAKEcourse0000000000000001&randNum=HCAZGNWF",
+    expect: { ticketid: "FAKEticket0000000000000001", expire: "1791977025", sign: "0000000000000000000000000000000000000000" },
   },
   {
     name: "只有查询串、没有域名",

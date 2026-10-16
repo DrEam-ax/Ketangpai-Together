@@ -14,7 +14,14 @@ import { KtpClient } from "../src/client.ts";
 import { getCachedToken, loadConfig, resolveAccount, setCachedToken } from "../src/config.ts";
 
 const config = loadConfig();
-const courseid = process.argv[2] ?? "FAKEid0002";
+// ⚠️ 课程 ID 不再写死在仓库里（那是真实的课程，不该公开）。
+// 用法: node <本脚本> <courseid>    —— courseid 可以从 `node src/cli.ts courses` 里抄
+const courseid = process.argv[2];
+if (!courseid) {
+  console.error("用法: node " + process.argv[1] + " <courseid>");
+  console.error("（courseid 用 `node src/cli.ts courses` 查）");
+  process.exit(1);
+}
 
 async function makeClient(label: string): Promise<KtpClient> {
   const account = resolveAccount(label);
@@ -93,7 +100,7 @@ console.log("=== 用例1：学生也在教室 ===");
 await oneCase("同位置", CLASSROOM);
 
 console.log("\n=== 用例2：学生偏 800 米（超出 radius=200）===");
-await oneCase("偏800米", { lat: "31.989900", lng: "116.407400" });
+await oneCase("偏800米", { lat: "39.911200", lng: "116.407400" });
 
 console.log("\n=== 用例3：学生在北京 ===");
 await oneCase("北京", { lat: "39.908700", lng: "116.397500" });

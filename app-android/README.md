@@ -624,7 +624,7 @@ $CM --build jniA
 cd tools/coord-test
 javac -encoding UTF-8 -d out src/com/ktp/scanner/Coord.java src/com/ktp/scanner/CoordTest.java
 java -cp out com.ktp.scanner.CoordTest
-# PASS 偏移量在合理区间 465 米 (39.9042,116.4074)   ← 北京
+# PASS 偏移量在合理区间 555 米 (39.9087,116.3975)   ← 北京
 # PASS 偏移量在合理区间 555 米 (39.9087,116.3975)   ← 北京
 # PASS 往返误差 < 1 米（实测最差 0.000 米）
 # ALL PASS

@@ -3,7 +3,14 @@ import { getCachedToken, loadConfig, resolveAccount, setCachedToken } from "../s
 const config = loadConfig();
 async function mk(l, force=false){ if(!force){const c=getCachedToken(l); if(c) return new KtpClient({token:c,label:l,fakeIpPrefixes:config.fakeIpPrefixes});} const a=resolveAccount(l); const cl=new KtpClient({label:l,fakeIpPrefixes:config.fakeIpPrefixes}); setCachedToken(l, await cl.login(a.email,a.password)); return cl; }
 const stu = await mk("stu", true);
-const courseid = "FAKEid0002";
+// ⚠️ 课程 ID 不再写死在仓库里（那是真实的课程，不该公开）。
+// 用法: node <本脚本> <courseid>    —— courseid 可以从 `node src/cli.ts courses` 里抄
+const courseid = process.argv[2];
+if (!courseid) {
+  console.error("用法: node " + process.argv[1] + " <courseid>");
+  console.error("（courseid 用 `node src/cli.ts courses` 查）");
+  process.exit(1);
+}
 
 const tries = [
   ["/AttenceApi/getNotFinishAttenceStudent", {}],

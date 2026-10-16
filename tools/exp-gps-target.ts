@@ -11,7 +11,14 @@ import { KtpClient } from "../src/client.ts";
 import { getCachedToken, loadConfig, resolveAccount, setCachedToken } from "../src/config.ts";
 
 const config = loadConfig();
-const courseid = process.argv[2] ?? "FAKEid0002";
+// ⚠️ 课程 ID 不再写死在仓库里（那是真实的课程，不该公开）。
+// 用法: node <本脚本> <courseid>    —— courseid 可以从 `node src/cli.ts courses` 里抄
+const courseid = process.argv[2];
+if (!courseid) {
+  console.error("用法: node " + process.argv[1] + " <courseid>");
+  console.error("（courseid 用 `node src/cli.ts courses` 查）");
+  process.exit(1);
+}
 
 async function makeClient(label: string): Promise<KtpClient> {
   const account = resolveAccount(label);
@@ -135,7 +142,7 @@ async function caseWithTarget(note: string, coords: Coords): Promise<void> {
 }
 
 await caseWithTarget("正好在教室", CLASSROOM);
-await caseWithTarget("偏 150 米(半径内)", { lat: "31.984050", lng: "116.407400" });
-await caseWithTarget("偏 800 米(半径外)", { lat: "31.989900", lng: "116.407400" });
+await caseWithTarget("偏 150 米(半径内)", { lat: "39.905400", lng: "116.407400" });
+await caseWithTarget("偏 800 米(半径外)", { lat: "39.911200", lng: "116.407400" });
 await caseWithTarget("北京", { lat: "39.908700", lng: "116.397500" });
 await caseWithTarget("0,0", { lat: "0.000000", lng: "0.000000" });

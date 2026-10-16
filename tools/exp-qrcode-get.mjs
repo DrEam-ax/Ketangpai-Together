@@ -25,7 +25,7 @@ function loadDemo() {
 
 const demo = loadDemo();
 const attenceid = process.argv[2] ?? demo.attenceid;
-const courseid = demo.courseid ?? "FAKEid0002";
+const courseid = demo.courseid ?? process.argv[3] ?? ""; // 课程 ID 不写死，见 --help
 if (!attenceid) {
   console.error("没有 attenceid，先跑 node tools/demo.ts create");
   process.exit(1);
