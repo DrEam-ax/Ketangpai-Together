@@ -890,6 +890,12 @@ public class MainActivity extends Activity {
             "offsetMeters",
             Math.round(
                 Coord.meters(best.getLatitude(), best.getLongitude(), gcj[0], gcj[1])));
+
+        // 按设置里的「定位方式」挑好的那组 —— 界面直接用它填输入框
+        String[] pick = CoordStore.pick(prefs, best.getLatitude(), best.getLongitude());
+        out.put("latPick", pick[0]);
+        out.put("lngPick", pick[1]);
+        out.put("coordMode", CoordStore.mode(prefs));
       } catch (Exception e) {
         return errJson(String.valueOf(e.getMessage()));
       }
@@ -955,9 +961,22 @@ public class MainActivity extends Activity {
         out.put("mode", ipMode());
         out.put("sharedIp", prefs.getString("sharedIp", ""));
         out.put("accounts", list);
+        out.put("coordMode", CoordStore.mode(prefs));
       } catch (Exception ignored) {
       }
       return out.toString();
+    }
+
+    /**
+     * 定位方式：读当前位置时按哪套坐标填进输入框。
+     * gcj = 高德/腾讯的 GCJ-02「火星坐标」（国产 App 常用）
+     * wgs = 手机 GPS 原始坐标 WGS-84
+     * 两者在国内差 300~600 米，选错签到可能就落出范围了。
+     */
+    @JavascriptInterface
+    public String setCoordMode(String mode) {
+      CoordStore.setMode(prefs, mode);
+      return "{\"ok\":true}";
     }
 
     @JavascriptInterface

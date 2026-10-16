@@ -315,10 +315,8 @@ document.querySelectorAll("#tabbar .tab").forEach((b) =>
 
 // ---------------------------------------------------------------- 签到位置库
 
-/** 上次「读当前位置」拿到的结果（两套坐标都在里面），给「换成另一套坐标」用 */
+/** 上次「读当前位置」拿到的结果（两套坐标都在里面） */
 let lastFix = null;
-/** 当前读出来的这组坐标用的是哪套：'gcj' 还是 'wgs' */
-let fixKind = "gcj";
 
 /**
  * 画位置列表。
@@ -444,8 +442,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 $("#loc-here").addEventListener("click", async () => {
   const btn = $("#loc-here");
   const hint = $("#loc-hint");
-  const swap = $("#loc-swap");
-  swap.style.display = "none";
   lastFix = null;
 
   const s = JSON.parse(native.startLocating());
@@ -482,18 +478,32 @@ $("#loc-here").addEventListener("click", async () => {
     return;
   }
   lastFix = best;
-  fixKind = "gcj"; // 默认按「课堂派用高德坐标系」填，国产 App 绝大多数如此
-  applyFix();
-  swap.style.display = "grid";
+  applyFix(); // 用设置里选定的定位方式填
 });
 
-/** 把 lastFix 按 fixKind 填进输入框，并刷新说明文字。 */
+/**
+ * 把 lastFix 填进输入框，并刷新说明文字。
+ *
+ * 用哪套坐标由**当前设置**（state.coordMode）决定，不是"读取那一刻"的方式 ——
+ * 否则在设置里换了定位方式再重填，还会按旧方式填（这个 bug 就是交互验证抓出来的：
+ * 之前优先用 lastFix.coordMode，改回高德后输入框纹丝不动）。
+ *
+ * lastFix 里两套坐标都有，所以这里能直接换，不用重新定位。
+ */
 function applyFix() {
   if (!lastFix) return;
   const hint = $("#loc-hint");
-  const isGcj = fixKind === "gcj";
-  $("#loc-lat").value = isGcj ? lastFix.latGcj : lastFix.lat;
-  $("#loc-lng").value = isGcj ? lastFix.lngGcj : lastFix.lng;
+  const isGcj = (state.coordMode || "gcj") === "gcj";
+  const haveBoth = lastFix.latGcj !== undefined && lastFix.latGcj !== "";
+
+  if (haveBoth) {
+    $("#loc-lat").value = isGcj ? lastFix.latGcj : lastFix.lat;
+    $("#loc-lng").value = isGcj ? lastFix.lngGcj : lastFix.lng;
+  } else {
+    // 兜底：老版本的结果里可能只有原生挑好的那组
+    $("#loc-lat").value = lastFix.latPick || lastFix.lat;
+    $("#loc-lng").value = lastFix.lngPick || lastFix.lng;
+  }
 
   const lines = [];
   lines.push(`手机读到（WGS-84 GPS）：${lastFix.lat}, ${lastFix.lng}`);
@@ -501,26 +511,18 @@ function applyFix() {
   lines.push(`两者相差 ${lastFix.offsetMeters} 米`);
   lines.push("");
   lines.push(
-    `当前填的是【${isGcj ? "高德坐标 GCJ-02" : "GPS 原始坐标 WGS-84"}】。\n` +
-      `不确定用哪套？在高德里长按教室看它显示的坐标，和上面哪一行一样就用哪套。`,
+    `按设置里的定位方式，填的是【${isGcj ? "高德坐标 GCJ-02" : "本机 GPS 坐标 WGS-84"}】。\n` +
+      `要换另一套，去「设置 → 定位方式」改，再点一次「读当前位置」。`,
   );
   if (lastFix.mock) {
     lines.push("");
-    lines.push("⚠️ 这次读到的位置来自**模拟定位**（影梭之类），不是真实位置。");
+    lines.push("⚠️ 这次读到的位置来自模拟定位（影梭之类），不是真实位置。");
   } else if (lastFix.accuracy > 50) {
     lines.push("");
     lines.push(`⚠️ 精度一般（±${lastFix.accuracy} 米），到窗边/室外再点一次会更准。`);
   }
   hint.textContent = lines.join("\n");
-  $("#loc-swap-btn").textContent = isGcj ? "换成 GPS 原始坐标" : "换成高德坐标";
 }
-
-$("#loc-swap-btn").addEventListener("click", () => {
-  if (!lastFix) return;
-  fixKind = fixKind === "gcj" ? "wgs" : "gcj";
-  applyFix();
-  log(`已填入${fixKind === "gcj" ? "高德坐标（GCJ-02）" : "GPS 原始坐标（WGS-84）"}`, "ok");
-});
 
 
 $("#primary").addEventListener("change", (e) => {
@@ -572,8 +574,10 @@ function loadSettings() {
     const s = JSON.parse(native.getSettings());
     state.ipMode = s.mode || "perAccount";
     state.sharedIp = s.sharedIp || "";
+    state.coordMode = s.coordMode || "gcj";
   } catch {
     state.ipMode = "perAccount";
+    state.coordMode = "gcj";
   }
   const sel = $("#ipmode");
   if (sel) sel.value = state.ipMode;
@@ -586,7 +590,28 @@ function loadSettings() {
           ? `所有账号都报同一个 IP：${state.sharedIp}`
           : "每个账号一个固定假 IP（首次分配后不再变，像各自的住处）。";
   }
+
+  const cm = $("#coordmode");
+  if (cm) cm.value = state.coordMode;
+  const ch = $("#coord-hint");
+  if (ch) {
+    ch.textContent =
+      state.coordMode === "wgs"
+        ? "读当前位置时填「手机 GPS 原始坐标（WGS-84）」。\n如果签到位置总往一个方向偏几百米，多半该换成高德坐标。"
+        : "读当前位置时填「高德坐标（GCJ-02）」。\n判断方法：在高德里看你现在的位置，和读出来的坐标对得上，就是这套对。";
+  }
+  const cb = $("#coord-badge");
+  if (cb) cb.textContent = state.coordMode === "wgs" ? "GPS" : "高德";
 }
+
+$("#coordmode").addEventListener("change", (e) => {
+  native.setCoordMode(e.target.value);
+  state.coordMode = e.target.value;
+  loadSettings();
+  // 已经读过位置的话，立刻按新方式重新填一次，省得再跑一遍定位
+  if (lastFix) applyFix();
+  log(`定位方式已改为「${e.target.value === "wgs" ? "本机 GPS（WGS-84）" : "高德（GCJ-02）"}」`, "ok");
+});
 
 // ---------------------------------------------------------------- 解析票据
 

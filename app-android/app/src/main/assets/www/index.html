@@ -68,9 +68,6 @@
                 <button id="loc-fill" class="ghost">回填</button>
               </div>
               <button id="loc-here" class="ghost">读当前位置</button>
-              <div class="row2" id="loc-swap" style="display: none">
-                <button id="loc-swap-btn" class="ghost">换成另一套坐标</button>
-              </div>
               <div class="tip pre" id="loc-hint"></div>
             </div>
           </details>
@@ -109,6 +106,23 @@
                 <span class="dim">各家 ROM 叫法不同，小米叫「自启动」+「省电策略：无限制」，
 华为叫「应用启动管理：手动管理」，OPPO/vivo 叫「允许后台运行」。</span>
               </div>
+            </div>
+          </details>
+        </div>
+
+        <!-- 定位方式 -->
+        <div class="card">
+          <details id="coordbox">
+            <summary>定位方式<span class="mon-badge" id="coord-badge"></span></summary>
+            <div class="stack">
+              <div class="dim small">
+                点「读当前位置」时，按哪套坐标填进 GPS 签到栏的输入框。
+              </div>
+              <select id="coordmode">
+                <option value="gcj">高德坐标（GCJ-02）</option>
+                <option value="wgs">本机 GPS 坐标（WGS-84）</option>
+              </select>
+              <div class="tip pre" id="coord-hint"></div>
             </div>
           </details>
         </div>

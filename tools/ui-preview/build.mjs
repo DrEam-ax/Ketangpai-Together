@@ -39,9 +39,10 @@ const MOCK = `
     { name: "一个特别长的位置名字测试", lat: "39.908700", lng: "116.397500" },
   ];
   var ACTIVE = "二教305";
+  var COORD = "gcj";
   window.Android = {
     listAccounts: () => JSON.stringify(ACCOUNTS),
-    getSettings: () => JSON.stringify({ mode: "perAccount", sharedIp: "", accounts: ACCOUNTS }),
+    getSettings: () => JSON.stringify({ mode: "perAccount", sharedIp: "", accounts: ACCOUNTS, coordMode: COORD }),
     setIpMode: () => '{"ok":true}',
     rerollIps: () => '{"ok":true}',
     removeAccount: () => '{"ok":true}',
@@ -92,7 +93,8 @@ const MOCK = `
       ACTIVE = n;
       return '{"ok":true}';
     },
-    readCurrentLocation: () => JSON.stringify({ ok: true, lat: "39.904200", lng: "116.407400", accuracy: 12, ageSec: 2, provider: "gps", mock: false, cached: false }),
+    readCurrentLocation: () => JSON.stringify({ ok: true, lat: "39.904200", lng: "116.407400", latGcj: "39.907500", lngGcj: "116.413500", offsetMeters: 465, latPick: COORD === "wgs" ? "39.904200" : "39.907500", lngPick: COORD === "wgs" ? "116.407400" : "116.413500", coordMode: COORD, accuracy: 12, ageSec: 2, provider: "gps", mock: false, cached: false }),
+    setCoordMode: (m) => { COORD = m; return '{"ok":true}'; },
     startLocating: () => JSON.stringify({ ok: true, providers: "gps network", gpsOn: true }),
     stopLocatingNow: () => '{"ok":true}',
     signLocationNow: () => JSON.stringify({ ok: true, state: 1, message: "签到成功", lat: "39.904200", lng: "116.407400" }),
@@ -309,7 +311,42 @@ const FRAME = `<!doctype html>
       out.calls = w.__calls || [];
     }
 
-    new Image().src = "http://127.0.0.1:8899/diag?d=" + encodeURIComponent(JSON.stringify(out));
+    // ==== 交互验证（#coordtest）：定位方式这个链路
+    //   设置里改成「本机 GPS」-> 读当前位置 -> 输入框应是 WGS 那组
+    //   再改回「高德」-> 立刻重填成 GCJ 那组（不用重新定位）
+    if (window.location.hash === "#coordtest") {
+      d.querySelector('#tabbar .tab[data-tab="settings"]').click();
+      var cm = d.getElementById("coordmode");
+      cm.value = "wgs";
+      cm.dispatchEvent(new Event("change"));
+      out.badgeAfterWgs = d.getElementById("coord-badge").textContent;
+
+      d.querySelector('#tabbar .tab[data-tab="gps"]').click();
+      var lb3 = d.getElementById("locbox");
+      if (lb3) lb3.open = true;
+      d.getElementById("loc-here").click(); // 异步，要等它跑完
+
+      window.setTimeout(function () {
+        out.latAfterWgs = d.getElementById("loc-lat").value;
+        out.lngAfterWgs = d.getElementById("loc-lng").value;
+
+        d.querySelector('#tabbar .tab[data-tab="settings"]').click();
+        cm.value = "gcj";
+        cm.dispatchEvent(new Event("change"));
+        out.latAfterSwitchBack = d.getElementById("loc-lat").value;
+        out.lngAfterSwitchBack = d.getElementById("loc-lng").value;
+        out.calls = w.__calls || [];
+        sendDiag();
+      }, 2500);
+      return;
+    }
+
+    sendDiag();
+
+    function sendDiag() {
+      new Image().src =
+        "http://127.0.0.1:8899/diag?d=" + encodeURIComponent(JSON.stringify(out));
+    }
 
     // 看哪一栏 / 哪张卡：frame.html#scan / #gps / #settings / #location / #monitor
     // 注意：App 是从 localStorage 恢复栏位的（不看 hash），所以这里直接**点那个标签**。
