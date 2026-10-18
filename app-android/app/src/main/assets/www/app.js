@@ -10,7 +10,12 @@ const state = {
   scanning: false,
   ipMode: "perAccount",
   sharedIp: "",
+  /** 「点击检测」的序号：原生侧每跑完一次 +1 */
+  oneShotSeq: 0,
 };
+
+/** 上一次「点击检测」的结果文案（null = 还没点过） */
+let lastCheckStatus = "";
 
 // ---------------------------------------------------------------- 日志
 
@@ -143,6 +148,7 @@ function loadMonitor() {
     return;
   }
   if (!r.ok) return;
+  state.oneShotSeq = r.oneShotSeq || 0;
 
   const sel = $("#primary");
   const cur = r.primary || "";
@@ -193,7 +199,7 @@ function loadMonitor() {
     badge.textContent = "";
   }
 
-  renderPending(r.pending || []);
+  renderPending(r.pending || [], lastCheckStatus);
   loadLocations();
 }
 
@@ -208,16 +214,18 @@ const KIND = { 1: "数字码签到", 2: "定位签到", 3: "扫码签到", 4: "�
  * 同一份数据画到两个地方：设置栏的「签到提醒」里画全部，
  * GPS 栏只画定位签到（那里才是处理它的地方）。
  */
-function renderPending(list) {
+function renderPending(list, statusText) {
   const gps = list.filter((x) => x.type === "2");
   paintPending($("#pending"), list);
   paintPending($("#pending-gps"), gps);
 
   const tip = $("#gps-tip");
   if (tip) {
-    tip.textContent = gps.length
+    const base = gps.length
       ? "点「立即签到」就会用上面「签到位置」里生效的那个坐标提交。"
-      : "现在没有进行中的定位签到。有的话会自动出现在这里（需要在设置栏里先开启「签到提醒」）。";
+      : "现在没有进行中的定位签到。点右上角「点击检测」可以立刻查一次（不用一直开着监控）。";
+    // 手动检测的结果附在后面（只有点过检测才有）
+    tip.textContent = statusText ? base + "\n" + statusText : base;
   }
   const badge = $("#gps-badge");
   if (badge) badge.textContent = gps.length ? `${gps.length} 个待签` : "";
@@ -273,6 +281,55 @@ function paintPending(box, list) {
     }),
   );
 }
+
+/**
+ * 「点击检测」：立刻查一次有没有正在进行的定位签到。
+ *
+ * 原生侧**不等结果** —— 二十多门课挨个问，同步等会卡住界面甚至 ANR。
+ * 它只是起个后台线程，跑完把 MonitorService.oneShotSeq +1。
+ * 所以这里点完就开始轮询 getMonitor()，看到序号变大就说明跑完了。
+ */
+$("#gps-check").addEventListener("click", async () => {
+  const btn = $("#gps-check");
+  if (btn.disabled) return; // 连点忽略
+  const before = state.oneShotSeq || 0;
+  btn.disabled = true;
+  btn.textContent = "检测中…";
+
+  try {
+    const r = JSON.parse(native.checkGpsNow());
+    if (!r.ok) {
+      lastCheckStatus = "检测没启动起来：" + (r.error || "");
+      renderPending([], lastCheckStatus);
+      log(lastCheckStatus, "er");
+      return;
+    }
+
+    // 最多等 ~35 秒（28 门课 8 个并发，正常几秒就回来了）
+    for (let i = 0; i < 50; i++) {
+      await sleep(700);
+      let m;
+      try {
+        m = JSON.parse(native.getMonitor());
+      } catch {
+        continue;
+      }
+      state.oneShotSeq = m.oneShotSeq || 0;
+      if (state.oneShotSeq > before) {
+        lastCheckStatus = m.status || "检测完成";
+        renderPending(m.pending || [], lastCheckStatus);
+        log(lastCheckStatus, "ok");
+        return;
+      }
+    }
+    lastCheckStatus = "检测超时 —— 网络可能不通，或者课程太多没跑完";
+    renderPending([], lastCheckStatus);
+    log(lastCheckStatus, "wa");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "点击检测";
+  }
+});
 
 // ---------------------------------------------------------------- 签到位置库
 

@@ -144,6 +144,12 @@ main {
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
+/* 卡片标题右侧的小按钮（比如「点击检测」）——比正文里的按钮矮一点 */
+.head button.mini {
+  padding: 6px 11px;
+  font-size: 12.5px;
+  flex: none;
+}
 .chk {
   display: inline-flex;
   align-items: center;

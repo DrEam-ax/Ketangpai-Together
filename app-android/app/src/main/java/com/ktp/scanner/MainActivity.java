@@ -660,6 +660,9 @@ public class MainActivity extends Activity {
         out.put("roomLng", prefs.getString(CheckinHelper.PREF_LNG, ""));
         out.put("pending", new JSONArray(MonitorService.pendingJson));
         out.put("locationGranted", locationAllowed());
+        // 手动「点击检测」的进度：界面靠 oneShotSeq 变化判断跑完没有
+        out.put("oneShotSeq", MonitorService.oneShotSeq);
+        out.put("oneShotRunning", MonitorService.oneShotRunning);
       } catch (Exception e) {
         return errJson(String.valueOf(e.getMessage()));
       }
@@ -913,6 +916,21 @@ public class MainActivity extends Activity {
     public String signLocationNow(String attenceId) {
       // 注意 MainActivity.this：这里在内部类 Bridge 里，直接写 this 是 Bridge 实例
       return CheckinHelper.signLocation(MainActivity.this, attenceId).toString();
+    }
+
+    /**
+     * 手动检测一次：立即返回，后台线程去问主成员的每门课。
+     * 结果写进 MonitorService.pendingJson，界面轮询 getMonitor() 取。
+     * （不在 bridge 里同步等 —— 二十多门课问下来会卡住界面，甚至 ANR）
+     */
+    @JavascriptInterface
+    public String checkGpsNow() {
+      try {
+        MonitorService.checkOnce(MainActivity.this);
+        return "{\"ok\":true}";
+      } catch (Exception e) {
+        return errJson(String.valueOf(e.getMessage()));
+      }
     }
 
     @JavascriptInterface

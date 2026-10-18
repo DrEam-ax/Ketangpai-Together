@@ -154,103 +154,153 @@ public class MonitorService extends Service {
 
   // ------------------------------------------------------------------ 一轮检查
 
-  private void pollOnce() {
-    JSONObject acc = primaryAccount();
-    if (acc == null) {
-      lastStatus = "还没选主成员";
-      updateMonitorNotification(lastStatus);
-      return;
+  /** 单次检测的序号（每跑完一次 +1）。界面靠它判断"我点的那次跑完了没"。 */
+  static volatile long oneShotSeq = 0;
+  static volatile boolean oneShotRunning = false;
+  /** 上一轮扫了多少门课（只用于状态文案） */
+  static volatile int lastCourseCount = 0;
+
+  /**
+   * 手动「点击检测」：在后台线程跑一轮，结果写进 pendingJson / lastStatus。
+   *
+   * 为什么不直接把结果 return 给界面：一轮要挨个问二十多门课，
+   * 在 JS bridge 里同步等会卡住界面（甚至 ANR）。所以这里**立刻返回**，
+   * 界面轮询 getMonitor() 的 oneShotSeq 就知道跑完没有。
+   *
+   * 也**不弹通知** —— 用户正看着屏幕，列表直接显示出来就够了。
+   */
+  static void checkOnce(final Context ctx) {
+    if (oneShotRunning) return; // 连点就忽略，别叠着跑
+    oneShotRunning = true;
+    new Thread(
+            new Runnable() {
+              @Override
+              public void run() {
+                try {
+                  List<String[]> list = scanOngoing(ctx);
+                  JSONArray pend = new JSONArray();
+                  StringBuilder sb = new StringBuilder();
+                  for (String[] o : list) {
+                    JSONObject item = new JSONObject();
+                    item.put("course", o[0]);
+                    item.put("id", o[1]);
+                    item.put("type", o[2]);
+                    item.put("title", o[3]);
+                    pend.put(item);
+                    if (sb.length() > 0) sb.append('；');
+                    sb.append(o[0]);
+                  }
+                  pendingJson = pend.toString();
+                  lastCheckAt = System.currentTimeMillis();
+                  lastStatus =
+                      list.isEmpty()
+                          ? "检测完成 · " + lastCourseCount + " 门课都没有在签到"
+                          : "发现正在签到（" + list.size() + "）：" + sb;
+                } catch (Exception e) {
+                  lastStatus = "检测出错：" + e.getMessage();
+                } finally {
+                  oneShotRunning = false;
+                  oneShotSeq++;
+                }
+              }
+            },
+            "ktp-check-once")
+        .start();
+  }
+
+  /**
+   * 扫一轮主成员所有课程，返回正在进行的签到，每项 {课程名, attenceid, type, title}。
+   *
+   * 抽成静态方法，是为了让**手动检测**和**后台轮询**用同一套逻辑 ——
+   * 两处各写一遍迟早会走偏（比如只在一处处理 token 过期、只在一处判断课程列表为空）。
+   */
+  static List<String[]> scanOngoing(Context ctx) throws Exception {
+    SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    JSONObject acc = KtpApi.primaryAccount(prefs);
+    if (acc == null) throw new Exception("还没选主成员");
+
+    String ip = KtpApi.ipForAccount(prefs, acc);
+    String token = KtpApi.ensureToken(prefs, acc, ip); // 没 token 会自动登录并写回
+
+    JSONObject courseRes = KtpApi.call("/courseApi/simpleLists", new JSONObject(), token, ip);
+    if (isTokenBad(courseRes)) {
+      // token 过期（换了手机/太久没用）→ 重新登录一次
+      token = KtpApi.login(acc.optString("email"), acc.optString("password"), ip);
+      KtpApi.saveToken(prefs, acc.optString("key"), token);
+      courseRes = KtpApi.call("/courseApi/simpleLists", new JSONObject(), token, ip);
     }
 
-    String key = acc.optString("key");
-    String email = acc.optString("email");
-    String password = acc.optString("password");
-    String ip = ipForAccount(acc);
-    String token = acc.optString("token", "");
+    JSONObject data = courseRes.optJSONObject("data");
+    List<JSONObject> courses = new ArrayList<>();
+    if (data != null) {
+      collect(data.optJSONArray("toplists"), courses);
+      collect(data.optJSONArray("lists"), courses);
+    }
+    lastCourseCount = courses.size();
+    if (courses.isEmpty()) throw new Exception("没读到课程列表");
 
-    try {
-      if (token.isEmpty()) {
-        token = KtpApi.login(email, password, ip);
-        saveToken(key, token);
-      }
+    final List<String[]> ongoing = Collections.synchronizedList(new ArrayList<String[]>());
+    final String fToken = token;
+    final String fIp = ip;
+    final int n = courses.size();
+    final CountDownLatch latch = new CountDownLatch(n);
+    // 并发上限：28 门课同时开 28 个线程没必要，反而更容易被风控
+    final java.util.concurrent.Semaphore gate = new java.util.concurrent.Semaphore(MAX_PARALLEL);
 
-      JSONObject courseRes = KtpApi.call("/courseApi/simpleLists", new JSONObject(), token, ip);
-      if (isTokenBad(courseRes)) {
-        // token 过期（换了手机/太久没用）→ 重新登录一次
-        token = KtpApi.login(email, password, ip);
-        saveToken(key, token);
-        courseRes = KtpApi.call("/courseApi/simpleLists", new JSONObject(), token, ip);
-      }
-
-      JSONObject data = courseRes.optJSONObject("data");
-      List<JSONObject> courses = new ArrayList<>();
-      if (data != null) {
-        collect(data.optJSONArray("toplists"), courses);
-        collect(data.optJSONArray("lists"), courses);
-      }
-      if (courses.isEmpty()) {
-        lastStatus = "没读到课程列表";
-        updateMonitorNotification(lastStatus);
-        return;
-      }
-
-      final List<String[]> ongoing = Collections.synchronizedList(new ArrayList<String[]>());
-      final String fToken = token;
-      final String fIp = ip;
-      final int n = courses.size();
-      final CountDownLatch latch = new CountDownLatch(n);
-      // 并发上限：28 门课同时开 28 个线程没必要，反而更容易被风控
-      final java.util.concurrent.Semaphore gate =
-          new java.util.concurrent.Semaphore(MAX_PARALLEL);
-
-      for (int i = 0; i < n; i++) {
-        final JSONObject c = courses.get(i);
-        new Thread(
-                new Runnable() {
-                  @Override
-                  public void run() {
-                    try {
-                      gate.acquire();
-                    } catch (InterruptedException ie) {
-                      latch.countDown();
-                      return;
-                    }
-                    try {
-                      JSONObject body = new JSONObject();
-                      body.put("courseid", c.optString("id"));
-                      JSONObject res =
-                          KtpApi.call("/AttenceApi/getNotFinishAttenceStudent", body, fToken, fIp);
-                      JSONArray lists = res.optJSONObject("data") == null
-                          ? null
-                          : res.optJSONObject("data").optJSONArray("lists");
-                      if (lists != null && lists.length() > 0) {
-                        for (int k = 0; k < lists.length(); k++) {
-                          JSONObject it = lists.getJSONObject(k);
-                          ongoing.add(
-                              new String[] {
-                                c.optString("coursename", "未知课程"),
-                                it.optString("id"),
-                                it.optString("type", ""),
-                                it.optString("title", "")
-                              });
-                        }
-                      }
-                    } catch (Exception ignored) {
-                      // 单门课失败不该让整轮失败
-                    } finally {
-                      gate.release();
-                      latch.countDown();
-                    }
+    for (int i = 0; i < n; i++) {
+      final JSONObject c = courses.get(i);
+      new Thread(
+              new Runnable() {
+                @Override
+                public void run() {
+                  try {
+                    gate.acquire();
+                  } catch (InterruptedException ie) {
+                    latch.countDown();
+                    return;
                   }
-                })
-            .start();
-      }
-      latch.await(20, TimeUnit.SECONDS);
+                  try {
+                    JSONObject body = new JSONObject();
+                    body.put("courseid", c.optString("id"));
+                    JSONObject res =
+                        KtpApi.call("/AttenceApi/getNotFinishAttenceStudent", body, fToken, fIp);
+                    JSONArray lists =
+                        res.optJSONObject("data") == null
+                            ? null
+                            : res.optJSONObject("data").optJSONArray("lists");
+                    if (lists != null && lists.length() > 0) {
+                      for (int k = 0; k < lists.length(); k++) {
+                        JSONObject it = lists.getJSONObject(k);
+                        ongoing.add(
+                            new String[] {
+                              c.optString("coursename", "未知课程"),
+                              it.optString("id"),
+                              it.optString("type", ""),
+                              it.optString("title", "")
+                            });
+                      }
+                    }
+                  } catch (Exception ignored) {
+                    // 单门课失败不该让整轮失败
+                  } finally {
+                    gate.release();
+                    latch.countDown();
+                  }
+                }
+              })
+          .start();
+    }
+    latch.await(20, TimeUnit.SECONDS);
+    return ongoing;
+  }
 
+  private void pollOnce() {
+    try {
+      List<String[]> ongoing = scanOngoing(this);
       lastCheckAt = System.currentTimeMillis();
       if (ongoing.isEmpty()) {
         pendingJson = "[]";
-        lastStatus = "正常 · " + n + " 门课都没有在签到";
+        lastStatus = "正常 · " + lastCourseCount + " 门课都没有在签到";
         updateMonitorNotification(lastStatus);
         return;
       }
@@ -374,7 +424,7 @@ public class MonitorService extends Service {
             ? new Notification.Builder(this, CHANNEL_MONITOR)
             : new Notification.Builder(this);
 
-    JSONObject acc = primaryAccount();
+    JSONObject acc = KtpApi.primaryAccount(prefs);
     String who = acc == null ? "未选主成员" : acc.optString("name", acc.optString("key", ""));
 
     PendingIntent tap =
@@ -411,51 +461,8 @@ public class MonitorService extends Service {
   }
 
   // ------------------------------------------------------------------ 存储
-
-  private JSONObject primaryAccount() {
-    String key = prefs.getString("primaryKey", "");
-    if (key == null || key.isEmpty()) return null;
-    try {
-      JSONArray arr = new JSONArray(prefs.getString("accounts", "[]"));
-      for (int i = 0; i < arr.length(); i++) {
-        JSONObject o = arr.getJSONObject(i);
-        if (key.equals(o.optString("key"))) return o;
-      }
-    } catch (Exception ignored) {
-    }
-    return null;
-  }
-
-  private void saveToken(String key, String token) {
-    if (key == null || key.isEmpty() || token == null) return;
-    try {
-      JSONArray arr = new JSONArray(prefs.getString("accounts", "[]"));
-      for (int i = 0; i < arr.length(); i++) {
-        JSONObject o = arr.getJSONObject(i);
-        if (key.equals(o.optString("key"))) {
-          o.put("token", token);
-          break;
-        }
-      }
-      prefs.edit().putString("accounts", arr.toString()).apply();
-    } catch (Exception ignored) {
-    }
-  }
-
-  private String ipForAccount(JSONObject acc) {
-    String mode = prefs.getString("ipMode", "perAccount");
-    if ("real".equals(mode)) return null;
-    if ("same".equals(mode)) {
-      String shared = prefs.getString("sharedIp", "");
-      if (shared == null || !IpUtil.isValidIpv4(shared)) {
-        shared = IpUtil.randomIp();
-        prefs.edit().putString("sharedIp", shared).apply();
-      }
-      return shared;
-    }
-    String ip = acc == null ? null : acc.optString("ip", "");
-    return IpUtil.ensureValid(ip);
-  }
+  // 取账号 / 挑 IP / 存 token 的逻辑已经统一到 KtpApi 的静态方法里
+  // （定位签到和手动检测也要用同一套，放两处迟早走偏）
 
   /**
    * 已提醒过的签到 id。

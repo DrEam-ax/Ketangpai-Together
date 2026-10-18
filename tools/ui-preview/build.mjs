@@ -42,6 +42,7 @@ const MOCK = `
   ];
   var ACTIVE = "二教305";
   var COORD = "gcj";
+  var ONESHOT = 0;
   window.Android = {
     listAccounts: () => JSON.stringify(ACCOUNTS),
     getSettings: () => JSON.stringify({ mode: "perAccount", sharedIp: "", accounts: ACCOUNTS, coordMode: COORD }),
@@ -58,6 +59,8 @@ const MOCK = `
       lastCheckAt: Date.now(),
       notifGranted: true,
       pollMs: 10000,
+      oneShotSeq: ONESHOT,
+      oneShotRunning: false,
       roomLat: "39.904200",
       roomLng: "116.407400",
       locationGranted: true,
@@ -99,6 +102,7 @@ const MOCK = `
     setCoordMode: (m) => { COORD = m; return '{"ok":true}'; },
     startLocating: () => JSON.stringify({ ok: true, providers: "gps network", gpsOn: true }),
     stopLocatingNow: () => '{"ok":true}',
+    checkGpsNow: () => { ONESHOT++; return '{"ok":true}'; },
     signLocationNow: () => JSON.stringify({ ok: true, state: 1, message: "签到成功", lat: "39.904200", lng: "116.407400" }),
     startMonitor: () => '{"ok":true}',
     stopMonitor: () => '{"ok":true}',
@@ -340,6 +344,30 @@ const FRAME = `<!doctype html>
         out.calls = w.__calls || [];
         sendDiag();
       }, 2500);
+      return;
+    }
+
+    // ==== 交互验证（#gpschecktest）：标题右侧那个「点击检测」按钮
+    if (window.location.hash === "#gpschecktest") {
+      d.querySelector('#tabbar .tab[data-tab="gps"]').click();
+      var gb = d.getElementById("gps-check");
+      out.hasButton = !!gb;
+      out.btnTextBefore = gb ? gb.textContent : "";
+      if (gb) gb.click();
+      out.btnTextDuring = gb ? gb.textContent : ""; // 同步阶段就该变成"检测中…"
+      // 直接输出布尔值，免得命令行侧被中文编码搞乱
+      out.duringIsBusy = out.btnTextDuring === "检测中…";
+      window.setTimeout(function () {
+        out.btnTextAfter = gb ? gb.textContent : "";
+        out.btnDisabledAfter = gb ? gb.disabled : null;
+        out.afterIsIdle = out.btnTextAfter === "点击检测" && !out.btnDisabledAfter;
+        var tipEl = d.getElementById("gps-tip");
+        out.tip = tipEl ? tipEl.textContent : "";
+        out.tipHasStatus = /检测完成|发现正在签到|检测出错|超时/.test(out.tip);
+        out.pendingRows = d.querySelectorAll("#pending-gps .pend").length;
+        out.calls = w.__calls || [];
+        sendDiag();
+      }, 2600);
       return;
     }
 

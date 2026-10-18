@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **最新版** | [`dist/ktp-signin-0.7.1.apk`](dist/ktp-signin-0.7.1.apk)（16.3 MB，Android 7.0+） |
+| **最新版** | [`dist/ktp-signin-0.7.2.apk`](dist/ktp-signin-0.7.2.apk)（16.3 MB，Android 7.0+） |
 | **技术细节** | [app-android/README.md](app-android/README.md)（每个坑都有记录） |
 | **电脑端** | `npm run web` 起本地控制台，或 `node src/cli.ts` 命令行 |
 
@@ -78,6 +78,9 @@ OPPO/vivo＝「允许后台运行」。
 
 **上课时**：老师开了定位签到 → 手机弹通知 → 通知上直接有「**立即定位签到**」按钮，
 点一下就签好了。App 的 **GPS 签到** 栏也会列出正在进行的定位签到，带「立即签到」按钮。
+
+> 不想一直开着监控？**GPS 签到** 栏右上角有个「**点击检测**」，
+> 点一下立刻查一次（约几秒），不用等通知、也不用开着后台服务。
 
 #### 定位方式（重要）
 
