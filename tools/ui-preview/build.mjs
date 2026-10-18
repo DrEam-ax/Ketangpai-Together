@@ -371,6 +371,50 @@ const FRAME = `<!doctype html>
       return;
     }
 
+    // ==== 布局验证（#tabdot）：底部三栏 + 红点，三个标签必须严格对齐
+    //   红点如果参与 flex 布局，会把那一格撑高、把文字顶下去（真机上就是这样）。
+    if (window.location.hash === "#tabdot") {
+      var tabs = Array.prototype.slice.call(d.querySelectorAll("#tabbar .tab"));
+      out.tabCount = tabs.length;
+      out.tabs = tabs.map(function (t) {
+        var r = t.getBoundingClientRect();
+        var ic = t.querySelector(".ic");
+        var ir = ic ? ic.getBoundingClientRect() : null;
+        return {
+          text: t.textContent.trim(),
+          top: Math.round(r.top * 100) / 100,
+          h: Math.round(r.height * 100) / 100,
+          icTop: ir ? Math.round(ir.top * 100) / 100 : null,
+          hasDot: !!t.querySelector(".dot"),
+        };
+      });
+      var tops = out.tabs.map(function (x) { return x.top; });
+      var ics = out.tabs.map(function (x) { return x.icTop; });
+      var hs = out.tabs.map(function (x) { return x.h; });
+      out.maxTopDiff = Math.max.apply(null, tops) - Math.min.apply(null, tops);
+      out.maxIcDiff = Math.max.apply(null, ics) - Math.min.apply(null, ics);
+      out.maxHDiff = Math.max.apply(null, hs) - Math.min.apply(null, hs);
+      out.aligned = out.maxIcDiff < 0.6 && out.maxHDiff < 0.6;
+
+      var gpsTab = d.querySelector('#tabbar .tab[data-tab="gps"]');
+      var dot = gpsTab ? gpsTab.querySelector(".dot") : null;
+      out.hasDot = !!dot;
+      if (dot) {
+        var dr = dot.getBoundingClientRect();
+        var tr = gpsTab.getBoundingClientRect();
+        var ir2 = gpsTab.querySelector(".ic").getBoundingClientRect();
+        out.dot = {
+          w: Math.round(dr.width * 100) / 100,
+          h: Math.round(dr.height * 100) / 100,
+          insideTab: dr.top >= tr.top && dr.bottom <= tr.bottom,
+          nearIconTopRight:
+            dr.left > ir2.left && dr.left < ir2.right + 14 && Math.abs(dr.top - ir2.top) < 10,
+        };
+      }
+      sendDiag();
+      return;
+    }
+
     sendDiag();
 
     function sendDiag() {

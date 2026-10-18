@@ -86,6 +86,7 @@ main {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .tabbar .tab {
+  position: relative; /* 红点（.dot）的定位基准 */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -107,14 +108,19 @@ main {
   color: var(--accent);
   font-weight: 700;
 }
-/* 有正在进行的签到时，给标签加一个小红点 */
+/* 有正在进行的签到时，给标签加一个小红点。
+   必须是**绝对定位**：否则它会成为 tab 里的第三个 flex 子元素，
+   把这一格撑高、把「GPS 签到」几个字顶下去（真机上就是这样，和两侧不对齐）。 */
 .tabbar .tab .dot {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  margin-left: 7px; /* 挪到图标的右上角 */
   width: 7px;
   height: 7px;
-  margin-top: -20px;
-  margin-left: 22px;
   border-radius: 50%;
   background: var(--danger);
+  pointer-events: none; /* 别挡住点击 */
 }
 
 /* ---------------- 卡片 ---------------- */
