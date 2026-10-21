@@ -56,6 +56,8 @@ function loadAccounts() {
   }
   // 剪掉已经被删掉的账号
   for (const k of [...state.keys]) if (!list.some((a) => a.key === k)) state.keys.delete(k);
+  // 迁移导出的人选也要跟着账号列表走（删掉的成员不该还留在选中集合里）
+  for (const k of [...exportPick]) if (!list.some((a) => a.key === k)) exportPick.delete(k);
 
   const box = $("#accounts");
   box.innerHTML = "";
@@ -100,6 +102,7 @@ function loadAccounts() {
   );
   syncAllBox();
   count();
+  renderExportPick();
 }
 
 /** 全选框跟随实际选择状态（全选 / 半选 / 未选）。 */
@@ -844,15 +847,79 @@ $("#add").addEventListener("click", () => {
 
 // ---------------------------------------------------------------- 成员迁移
 
+/**
+ * 「要导出哪些人」的选中集合。
+ *
+ * 默认**一个都不选** —— 导出谁必须是明确点过的，不能一打开就顺手把全班导出去。
+ */
+const exportPick = new Set();
+
+/** 画「要导出哪些人」那一排小框（一行三个）。 */
+function renderExportPick() {
+  const box = $("#exp-pick");
+  if (!box) return;
+  box.innerHTML = "";
+  if (state.accounts.length === 0) {
+    box.innerHTML = `<div class="empty">还没有成员</div>`;
+    syncPickHint();
+    return;
+  }
+  for (const a of state.accounts) {
+    const on = exportPick.has(a.key);
+    const el = document.createElement("label");
+    el.className = "pick" + (on ? " on" : "");
+    el.innerHTML =
+      `<input type="checkbox" data-e="${esc(a.key)}" ${on ? "checked" : ""} />` +
+      `<span class="nm2">${esc(a.name || a.key)}</span>`;
+    box.appendChild(el);
+  }
+  box.querySelectorAll("input[data-e]").forEach((cb) =>
+    cb.addEventListener("change", () => {
+      if (cb.checked) exportPick.add(cb.dataset.e);
+      else exportPick.delete(cb.dataset.e);
+      cb.closest(".pick").classList.toggle("on", cb.checked);
+      syncPickHint();
+    }),
+  );
+  syncPickHint();
+}
+
+function syncPickHint() {
+  const el = $("#exp-pick-hint");
+  if (!el) return;
+  const n = exportPick.size;
+  const total = state.accounts.length;
+  el.textContent = n
+    ? `已选 ${n} / ${total} 人`
+    : `还没选人（共 ${total} 个）—— 点上面的框，或点「全选」`;
+}
+
+$("#exp-all").addEventListener("click", () => {
+  for (const a of state.accounts) exportPick.add(a.key);
+  renderExportPick();
+});
+
+$("#exp-none").addEventListener("click", () => {
+  exportPick.clear();
+  renderExportPick();
+});
+
 function setMigrateHint(text) {
   const el = $("#migrate-hint");
   if (el) el.textContent = text;
 }
 
-/** 生成导出串（不复制）。分享前也会用到。 */
+/** 生成导出串（不复制）。分享前也会用到。只导出选中的那些人。 */
 function buildExport() {
   const withSecrets = $("#exp-secrets").checked;
-  const r = JSON.parse(native.exportAccounts(withSecrets));
+  const keys = [...exportPick];
+  if (keys.length === 0) {
+    const msg = "还没选要导出谁 —— 先在上面点选，或点「全选」";
+    setMigrateHint(msg);
+    log(msg, "wa");
+    return null;
+  }
+  const r = JSON.parse(native.exportAccounts(withSecrets, JSON.stringify(keys)));
   if (!r.ok) {
     log(`导出失败：${r.error}`, "er");
     setMigrateHint(`导出失败：${r.error}`);

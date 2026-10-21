@@ -468,6 +468,42 @@ summary {
 
 /* ---------------- 工具类 ---------------- */
 
+/* 成员迁移：选要导出的人，一行三个小框 */
+.pickgrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0; /* 不加这个，长名字会把格子撑破 */
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 13px;
+  cursor: pointer;
+}
+.pick input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+.pick .nm2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick.on {
+  border-color: var(--accent);
+  background: rgba(76, 141, 255, 0.14);
+}
+
 .dim {
   color: var(--dim);
 }

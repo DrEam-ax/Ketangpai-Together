@@ -40,7 +40,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Locale;
 
 /**
@@ -453,21 +455,31 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------- 成员导入导出
 
     /**
-     * 导出全部账号为一个可复制的字符串。
+     * 把**选中的**账号导出为一个可复制的字符串。
      *
      * 编码方式是 JSON -> URL-safe Base64，前面加 "KTP1:" 前缀，
      * 好处：单行、换行和空格都不会破坏它，方便走微信/剪贴板。
      *
      * @param withSecrets 是否包含密码和 token（完整迁移用；不含则导入后要重新填密码）
+     * @param keysJson 要导出的账号 key（JSON 数组字符串）。为空 = 全部（兼容旧调用）
      */
     @JavascriptInterface
-    public String exportAccounts(boolean withSecrets) {
+    public String exportAccounts(boolean withSecrets, String keysJson) {
       JSONObject out = new JSONObject();
       try {
+        Set<String> only = null;
+        if (keysJson != null && !keysJson.trim().isEmpty()) {
+          only = new HashSet<>();
+          JSONArray keys = new JSONArray(keysJson);
+          for (int i = 0; i < keys.length(); i++) only.add(keys.optString(i));
+        }
+
         JSONArray arr = new JSONArray(prefs.getString("accounts", "[]"));
         JSONArray list = new JSONArray();
         for (int i = 0; i < arr.length(); i++) {
           JSONObject a = arr.getJSONObject(i);
+          // 只导出点名要的那些人 —— 界面上就是靠这个实现"选谁导谁"
+          if (only != null && !only.contains(a.optString("key"))) continue;
           JSONObject row = new JSONObject();
           row.put("key", a.optString("key"));
           row.put("email", a.optString("email"));
@@ -480,6 +492,12 @@ public class MainActivity extends Activity {
           }
           list.put(row);
         }
+        if (list.length() == 0) {
+          out.put("ok", false);
+          out.put("error", "没有选中任何成员");
+          return out.toString();
+        }
+
         JSONObject payload = new JSONObject();
         payload.put("v", 1);
         payload.put("app", "ktp");

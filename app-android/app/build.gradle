@@ -10,8 +10,8 @@ android {
     applicationId "com.ktp.scanner"
     minSdk 24
     targetSdk 35
-    versionCode 32
-    versionName "0.7.3"
+    versionCode 33
+    versionName "0.7.4"
 
     // 只留真机在用的 CPU 架构。
     // ML Kit 的 libbarhopper_v3.so 每个架构 3~6MB，x86/x86_64 是模拟器专用的，

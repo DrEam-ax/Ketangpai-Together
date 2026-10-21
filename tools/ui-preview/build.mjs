@@ -50,6 +50,22 @@ const MOCK = `
     rerollIps: () => '{"ok":true}',
     removeAccount: () => '{"ok":true}',
     addAccount: () => '{"ok":true,"name":"测试","school":"测试大学"}',
+    // 成员迁移：按传进来的 key 列表过滤（和原生实现一致 —— 没选人就报错）
+    exportAccounts: (withSecrets, keysJson) => {
+      const keys = keysJson ? JSON.parse(keysJson) : null;
+      const picked = keys ? ACCOUNTS.filter((a) => keys.includes(a.key)) : ACCOUNTS;
+      if (!picked.length) return '{"ok":false,"error":"没有选中任何成员"}';
+      return JSON.stringify({
+        ok: true,
+        count: picked.length,
+        withSecrets,
+        payload: "KTP1:DEMO-" + picked.map((a) => a.key).join("-"),
+      });
+    },
+    copyToClipboard: () => '{"ok":true}',
+    shareText: () => '{"ok":true}',
+    readClipboard: () => '{"ok":true,"text":""}',
+    importAccounts: () => '{"ok":true,"added":1,"updated":0,"total":6,"withSecrets":true}',
     startScan: () => {},
     getMonitor: () => JSON.stringify({
       ok: true,
@@ -411,6 +427,57 @@ const FRAME = `<!doctype html>
             dr.left > ir2.left && dr.left < ir2.right + 14 && Math.abs(dr.top - ir2.top) < 10,
         };
       }
+      sendDiag();
+      return;
+    }
+
+    // ==== 交互验证（#exppicktest）：成员迁移里"选谁导谁"
+    if (window.location.hash === "#exppicktest") {
+      d.querySelector('#tabbar .tab[data-tab="settings"]').click();
+      var mbox = d.getElementById("migratebox");
+      if (mbox) mbox.open = true;
+
+      var chips = d.querySelectorAll("#exp-pick .pick");
+      out.chipCount = chips.length;
+      out.chipTexts = Array.prototype.map.call(chips, function (c) {
+        return c.textContent.trim();
+      });
+      // 一行几个：按 top 值分组数一数
+      var tops = {};
+      Array.prototype.forEach.call(chips, function (c) {
+        var t = Math.round(c.getBoundingClientRect().top);
+        tops[t] = (tops[t] || 0) + 1;
+      });
+      out.perRow = Object.keys(tops).map(function (k) { return tops[k]; });
+
+      out.checkedAtStart = d.querySelectorAll("#exp-pick input:checked").length;
+      out.hintAtStart = (d.getElementById("exp-pick-hint") || {}).textContent || "";
+
+      // 没选人直接导出 → 应该被拦住（不调用原生）
+      d.getElementById("exp-copy").click();
+      out.exportCallsWhenEmpty = (w.__calls || []).filter(function (c) {
+        return c.indexOf("exportAccounts(") === 0;
+      }).length;
+      out.hintWhenEmpty = (d.getElementById("migrate-hint") || {}).textContent || "";
+
+      // 只选第 1、3 个 → 导出应只带这两个 key
+      chips[0].querySelector("input").click();
+      chips[2].querySelector("input").click();
+      out.checkedAfterTwo = d.querySelectorAll("#exp-pick input:checked").length;
+      d.getElementById("exp-copy").click();
+      var exCalls = (w.__calls || []).filter(function (c) {
+        return c.indexOf("exportAccounts(") === 0;
+      });
+      out.lastExportCall = exCalls[exCalls.length - 1] || "";
+      out.expOut = (d.getElementById("exp-out") || {}).value || "";
+
+      // 全选 / 全不选
+      d.getElementById("exp-all").click();
+      out.checkedAfterAll = d.querySelectorAll("#exp-pick input:checked").length;
+      d.getElementById("exp-none").click();
+      out.checkedAfterNone = d.querySelectorAll("#exp-pick input:checked").length;
+
+      out.calls = w.__calls || [];
       sendDiag();
       return;
     }

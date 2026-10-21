@@ -168,6 +168,14 @@
                 导出成一段文本 → 复制或分享到新手机 → 在新手机上「从剪贴板导入」。
               </div>
 
+              <div class="dim small">要导出哪些人？（点一下切换选中，默认一个都不选）</div>
+              <div id="exp-pick" class="pickgrid"></div>
+              <div class="row2">
+                <button id="exp-all" class="ghost">全选</button>
+                <button id="exp-none" class="ghost">全不选</button>
+              </div>
+              <div class="dim small" id="exp-pick-hint"></div>
+
               <label class="chk"><input type="checkbox" id="exp-secrets" checked />包含密码（不勾选则导入后要重填）</label>
               <div class="row2">
                 <button id="exp-copy">导出并复制</button>
