@@ -82,7 +82,13 @@ const FORBIDDEN = [
 ];
 
 /** 这些文件本来就在 .gitignore 里（不会被提交），整仓扫描时跳过，免得刷屏误报 */
-const SKIP_FILES = new Set(["config.local.json", "privacy.local.txt", "package-lock.json"]);
+const SKIP_FILES = new Set([
+  "config.local.json",
+  "privacy.local.txt",
+  "package-lock.json",
+  // 预览时生成的日志（已在 .gitignore），里面有渲染出来的名字
+  "tools/ui-preview/diag.log",
+]);
 
 function loadLocalTerms() {
   const p = path.join(ROOT, "privacy.local.txt");

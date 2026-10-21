@@ -868,9 +868,11 @@ function renderExportPick() {
     const on = exportPick.has(a.key);
     const el = document.createElement("label");
     el.className = "pick" + (on ? " on" : "");
+    // 显示**备注名**（key，你自己起的那个），不是课堂派上的真实姓名（name）。
+    // 真实姓名往往带一长串班级前缀，一行三个框放不下，会被截成一样的开头，根本认不出谁是谁。
     el.innerHTML =
       `<input type="checkbox" data-e="${esc(a.key)}" ${on ? "checked" : ""} />` +
-      `<span class="nm2">${esc(a.name || a.key)}</span>`;
+      `<span class="nm2" title="${esc(a.name || "")}">${esc(a.key || a.name)}</span>`;
     box.appendChild(el);
   }
   box.querySelectorAll("input[data-e]").forEach((cb) =>
