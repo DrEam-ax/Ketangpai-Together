@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **最新版** | [`dist/ktp-signin-0.7.5.apk`](dist/ktp-signin-0.7.5.apk)（16.3 MB，Android 7.0+） |
+| **最新版** | [`dist/ktp-signin-0.7.6.apk`](dist/ktp-signin-0.7.6.apk)（16.3 MB，Android 7.0+） |
 | **技术细节** | [app-android/README.md](app-android/README.md)（每个坑都有记录） |
 | **电脑端** | `npm run web` 起本地控制台，或 `node src/cli.ts` 命令行 |
 

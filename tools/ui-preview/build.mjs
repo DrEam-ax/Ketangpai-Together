@@ -490,6 +490,26 @@ const FRAME = `<!doctype html>
       return;
     }
 
+    // ==== 验证（#pwtest）：密码框必须是可粘贴的 text + 圆点遮罩
+    if (window.location.hash === "#pwtest") {
+      d.querySelector('#tabbar .tab[data-tab="settings"]').click();
+      var ab = d.getElementById("addbox");
+      if (ab) ab.open = true;
+      var pw = d.getElementById("p");
+      out.pwType = pw ? pw.type : "";
+      out.pwClass = pw ? pw.className : "";
+      out.pwPlaceholder = pw ? pw.placeholder : "";
+      var cs = w.getComputedStyle(pw);
+      out.textSecurity =
+        cs.webkitTextSecurity || cs.getPropertyValue("-webkit-text-security") || "";
+      if (pw) pw.value = "MyPass123"; // 模拟粘贴进来的内容
+      out.pwValue = pw ? pw.value : "";
+      out.isMasked = out.textSecurity === "disc";
+      out.notPasswordType = out.pwType === "text";
+      sendDiag();
+      return;
+    }
+
     sendDiag();
 
     function sendDiag() {

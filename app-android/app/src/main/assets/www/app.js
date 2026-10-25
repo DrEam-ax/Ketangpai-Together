@@ -1005,6 +1005,29 @@ $("#imp-text").addEventListener("click", () => doImport($("#exp-out").value, "�
 
 // ---------------------------------------------------------------- 启动
 
+/**
+ * 密码框能不能"粘贴"的处理。
+ *
+ * 页面里密码框用的是 type="text" + CSS 的 -webkit-text-security: disc（涂成圆点）。
+ * 为什么不用 type="password"：国产 ROM 见到它就会调起「安全键盘」，
+ * 那个键盘通常没有粘贴 —— 用户没法把密码粘进去。
+ *
+ * 万一某个 WebView 不支持 -webkit-text-security，就退回真正的 password 框：
+ * 宁可牺牲粘贴，也不能让密码明文显示在屏幕上。
+ */
+function guardPasswordMask() {
+  const p = $("#p");
+  if (!p) return;
+  const probe = document.createElement("input");
+  probe.style.webkitTextSecurity = "disc";
+  if (!probe.style.webkitTextSecurity) {
+    p.type = "password";
+    p.placeholder = "密码";
+    p.classList.remove("pw");
+    log("这个系统的 WebView 不支持密码圆点遮罩，已退回普通密码框（可能无法粘贴）", "wa");
+  }
+}
+
 (function main() {
   $("#env").textContent = native ? "原生扫码 · 原生网络" : "bridge 不可用";
   if (!native) {
@@ -1022,6 +1045,7 @@ $("#imp-text").addEventListener("click", () => doImport($("#exp-out").value, "�
   }
   switchTab(tab);
 
+  guardPasswordMask();
   loadSettings();
   loadAccounts();
   loadMonitor();

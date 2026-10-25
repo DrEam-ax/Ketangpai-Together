@@ -135,7 +135,16 @@
             <div class="stack">
               <input id="k" placeholder="备注名，如 小王" />
               <input id="e" placeholder="课堂派手机号" />
-              <input id="p" type="password" placeholder="密码" />
+              <input
+                id="p"
+                type="text"
+                class="pw"
+                placeholder="密码（可以粘贴）"
+                autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+              />
               <button id="add">添加并验证登录</button>
             </div>
             <p class="tip" id="addhint">会先真实登录一次，成功才保存到本机。</p>

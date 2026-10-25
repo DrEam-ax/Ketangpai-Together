@@ -466,6 +466,15 @@ summary {
   color: var(--warn);
 }
 
+/* 密码框：故意用 type="text" + 把字符涂成圆点。
+   用真正的 type="password" 时，国产 ROM 会弹出「安全键盘」，而那个键盘通常
+   **没有粘贴** —— 用户没法把密码粘进来（用户报过这个）。
+   万一某个 WebView 不支持 -webkit-text-security，app.js 会退回 type="password"
+   （宁可牺牲粘贴，也不能让密码明文显示）。 */
+.pw {
+  -webkit-text-security: disc;
+}
+
 /* ---------------- 工具类 ---------------- */
 
 /* 成员迁移：选要导出的人，一行三个小框 */
