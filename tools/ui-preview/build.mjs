@@ -51,6 +51,8 @@ const MOCK = `
   var ACTIVE = "二教305";
   var COORD = "gcj";
   var ONESHOT = 0;
+  var PRIMARY = "小明";   // 主成员（有状态：切换后 getMonitor 要能反映出来）
+  var SIGNED = 0;         // signLocationNow 被调用了几次
   window.Android = {
     listAccounts: () => JSON.stringify(ACCOUNTS),
     getSettings: () => JSON.stringify({ mode: "perAccount", sharedIp: "", accounts: ACCOUNTS, coordMode: COORD }),
@@ -77,7 +79,7 @@ const MOCK = `
     startScan: () => {},
     getMonitor: () => JSON.stringify({
       ok: true,
-      primary: "a",
+      primary: PRIMARY,
       running: true,
       status: "发现正在签到：高等数学；大学英语",
       lastCheckAt: Date.now(),
@@ -93,7 +95,7 @@ const MOCK = `
         { course: "大学英语（名字很长很长很长很长）", id: "att2", type: "3", title: "2026.10.14" },
       ],
     }),
-    setPrimary: () => '{"ok":true}',
+    setPrimary: (k) => { PRIMARY = k; return '{"ok":true}'; },
     setPollSeconds: () => '{"ok":true}',
     setRoomLocation: () => '{"ok":true}',
     // 位置库做**有状态**的假实现 —— 这样交互验证（#loctest）才有意义：
@@ -127,7 +129,7 @@ const MOCK = `
     startLocating: () => JSON.stringify({ ok: true, providers: "gps network", gpsOn: true }),
     stopLocatingNow: () => '{"ok":true}',
     checkGpsNow: () => { ONESHOT++; return '{"ok":true}'; },
-    signLocationNow: () => JSON.stringify({ ok: true, state: 1, message: "签到成功", lat: "39.904200", lng: "116.407400" }),
+    signLocationNow: () => { SIGNED++; return JSON.stringify({ ok: true, state: 1, message: "签到成功", lat: "39.904200", lng: "116.407400" }); },
     startMonitor: () => '{"ok":true}',
     stopMonitor: () => '{"ok":true}',
     submitQr: (keys, tid, exp) => JSON.stringify({
@@ -506,6 +508,42 @@ const FRAME = `<!doctype html>
       out.pwValue = pw ? pw.value : "";
       out.isMasked = out.textSecurity === "disc";
       out.notPasswordType = out.pwType === "text";
+      sendDiag();
+      return;
+    }
+
+    // ==== 交互验证（#switchtest）：签一个 → 切主成员 → 应该能接着签下一个
+    if (window.location.hash === "#switchtest") {
+      d.querySelector('#tabbar .tab[data-tab="gps"]').click();
+
+      function signBtn() {
+        return d.querySelector("#pending-gps button[data-sign]");
+      }
+      out.btnBefore = signBtn() ? signBtn().textContent : "(无按钮)";
+
+      // 第一个人签
+      signBtn().click();
+      out.btnAfterFirstSign = signBtn().textContent;
+      out.disabledAfterFirstSign = signBtn().disabled;
+
+      // 切主成员
+      var ps = d.getElementById("primary");
+      ps.value = "小红";
+      ps.dispatchEvent(new Event("change"));
+
+      // 切完人之后按钮必须恢复可点
+      var b2 = signBtn();
+      out.btnAfterSwitch = b2 ? b2.textContent : "(无按钮)";
+      out.disabledAfterSwitch = b2 ? b2.disabled : null;
+      out.primaryInMock = JSON.parse(w.Android.getMonitor()).primary;
+
+      // 第二个人再签
+      if (b2) b2.click();
+      out.signCalls = (w.__calls || []).filter(function (c) {
+        return c.indexOf("signLocationNow(") === 0;
+      }).length;
+      out.btnAfterSecondSign = signBtn() ? signBtn().textContent : "";
+      out.calls = w.__calls || [];
       sendDiag();
       return;
     }

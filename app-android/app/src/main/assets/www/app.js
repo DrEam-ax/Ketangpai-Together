@@ -12,6 +12,8 @@ const state = {
   sharedIp: "",
   /** 「点击检测」的序号：原生侧每跑完一次 +1 */
   oneShotSeq: 0,
+  /** 当前主成员的 key（切人时待签到列表要重绘） */
+  primary: "",
 };
 
 /** 上一次「点击检测」的结果文案（null = 还没点过） */
@@ -152,6 +154,8 @@ function loadMonitor() {
   }
   if (!r.ok) return;
   state.oneShotSeq = r.oneShotSeq || 0;
+  // 记下主成员：切了人，待签到列表要重绘（否则上一个人的「已签到 ✓」会一直留着）
+  state.primary = r.primary || "";
 
   const sel = $("#primary");
   const cur = r.primary || "";
@@ -247,10 +251,24 @@ function renderPending(list, statusText) {
   }
 }
 
+/**
+ * 已经签过的「谁 + 哪条考勤」。
+ *
+ * 光看考勤 id 不够：同一条定位签到会让**多个人**依次去签（先小明、切主成员再小红），
+ * 所以必须按「主成员 + attenceid」记账，否则切了人还以为已经签过。
+ */
+const signedKeys = new Set();
+
+function signKey(attenceId) {
+  return (state.primary || "") + "|" + attenceId;
+}
+
 function paintPending(box, list) {
   if (!box) return;
-  const sig = list.map((x) => x.id).join(",");
-  if (box.dataset.sig === sig) return; // 列表没变就不重绘，免得按钮点到一半被重建
+  // 签名里必须带主成员：切了人就得重绘，否则上一个人的「已签到 ✓」会一直留着
+  // （用户报过：切主成员后再检测，明明有待签的课却点不动）
+  const sig = (state.primary || "") + "#" + list.map((x) => x.id).join(",");
+  if (box.dataset.sig === sig) return; // 真的没变就不重绘，免得按钮点到一半被重建
   box.dataset.sig = sig;
   box.innerHTML = "";
   if (!list.length) return;
@@ -258,11 +276,16 @@ function paintPending(box, list) {
     const el = document.createElement("div");
     el.className = "pend";
     const kind = KIND[it.type] || "签到";
+    const done = it.type === "2" && signedKeys.has(signKey(it.id));
     el.innerHTML =
       `<span class="who2">${esc(it.course)}<br /><span class="kind">${esc(kind)}${
         it.title ? " · " + esc(it.title) : ""
       }</span></span>` +
-      (it.type === "2" ? `<button class="mini" data-sign="${esc(it.id)}">立即签到</button>` : "");
+      (it.type === "2"
+        ? `<button class="mini" data-sign="${esc(it.id)}"${done ? " disabled" : ""}>${
+            done ? "已签到 ✓" : "立即签到"
+          }</button>`
+        : "");
     box.appendChild(el);
   }
   box.querySelectorAll("button[data-sign]").forEach((b) =>
@@ -271,6 +294,7 @@ function paintPending(box, list) {
       b.textContent = "提交中…";
       const r = JSON.parse(native.signLocationNow(b.dataset.sign));
       if (r.ok) {
+        signedKeys.add(signKey(b.dataset.sign));
         b.textContent = "已签到 ✓";
         log(
           `定位签到成功${r.place ? `（位置「${r.place}」）` : ""}：报的坐标 ${r.lat}, ${r.lng}`,
