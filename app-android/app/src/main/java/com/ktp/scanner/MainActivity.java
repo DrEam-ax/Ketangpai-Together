@@ -681,6 +681,11 @@ public class MainActivity extends Activity {
         // 手动「点击检测」的进度：界面靠 oneShotSeq 变化判断跑完没有
         out.put("oneShotSeq", MonitorService.oneShotSeq);
         out.put("oneShotRunning", MonitorService.oneShotRunning);
+        // 自动签到会用的地点（「签到提醒」里那行小字要显示它）
+        JSONObject autoLoc = LocationStore.active(prefs);
+        out.put("autoPlace", autoLoc == null ? "" : autoLoc.optString("name", ""));
+        out.put("autoLat", autoLoc == null ? "" : autoLoc.optString("lat", ""));
+        out.put("autoLng", autoLoc == null ? "" : autoLoc.optString("lng", ""));
       } catch (Exception e) {
         return errJson(String.valueOf(e.getMessage()));
       }

@@ -53,6 +53,7 @@ const MOCK = `
   var ONESHOT = 0;
   var PRIMARY = "小明";   // 主成员（有状态：切换后 getMonitor 要能反映出来）
   var SIGNED = 0;         // signLocationNow 被调用了几次
+  var PEND_SIGNED = false; // 模拟"监控已经自动签掉了"
   window.Android = {
     listAccounts: () => JSON.stringify(ACCOUNTS),
     getSettings: () => JSON.stringify({ mode: "perAccount", sharedIp: "", accounts: ACCOUNTS, coordMode: COORD }),
@@ -80,6 +81,9 @@ const MOCK = `
     getMonitor: () => JSON.stringify({
       ok: true,
       primary: PRIMARY,
+      autoPlace: ACTIVE,
+      autoLat: "39.904200",
+      autoLng: "116.407400",
       running: true,
       status: "发现正在签到：高等数学；大学英语",
       lastCheckAt: Date.now(),
@@ -91,7 +95,7 @@ const MOCK = `
       roomLng: "116.407400",
       locationGranted: true,
       pending: [
-        { course: "高等数学", id: "att1", type: "2", title: "2026.10.14" },
+        { course: "高等数学", id: "att1", type: "2", title: "2026.10.14", signed: PEND_SIGNED },
         { course: "大学英语（名字很长很长很长很长）", id: "att2", type: "3", title: "2026.10.14" },
       ],
     }),
@@ -543,6 +547,40 @@ const FRAME = `<!doctype html>
         return c.indexOf("signLocationNow(") === 0;
       }).length;
       out.btnAfterSecondSign = signBtn() ? signBtn().textContent : "";
+      out.calls = w.__calls || [];
+      sendDiag();
+      return;
+    }
+
+    // ==== 交互验证（#autosign）：自动签到的界面表现
+    //   1) 「签到提醒」里要有"当前签到位置：xxx，将自动签到"那行
+    //   2) 监控把某条自动签掉（pending 里 signed=true）后，按钮要变「已签到 ✓」
+    if (window.location.hash === "#autosign") {
+      d.querySelector('#tabbar .tab[data-tab="settings"]').click();
+      var mb = d.getElementById("monbox");
+      if (mb) mb.open = true;
+      var hintEl = d.getElementById("auto-sign-hint");
+      out.hint = hintEl ? hintEl.textContent : "";
+
+      // 未自动签时的按钮
+      d.querySelector('#tabbar .tab[data-tab="gps"]').click();
+      var btn = d.querySelector("#pending-gps button[data-sign]");
+      out.btnBeforeAuto = btn ? btn.textContent : "(无按钮)";
+
+      // 让 mock 认为"已经自动签掉了"，再触发一次 loadMonitor
+      w.PEND_SIGNED = true;
+      var ps = d.getElementById("primary");
+      ps.dispatchEvent(new Event("change")); // change 会调 loadMonitor
+
+      var btn2 = d.querySelector("#pending-gps button[data-sign]");
+      out.btnAfterAuto = btn2 ? btn2.textContent : "(无按钮)";
+      out.disabledAfterAuto = btn2 ? btn2.disabled : null;
+
+      // 没有选位置时必须明确提示"不会自动签"
+      w.ACTIVE = "";
+      ps.dispatchEvent(new Event("change"));
+      out.hintNoPlace = (d.getElementById("auto-sign-hint") || {}).textContent || "";
+
       out.calls = w.__calls || [];
       sendDiag();
       return;

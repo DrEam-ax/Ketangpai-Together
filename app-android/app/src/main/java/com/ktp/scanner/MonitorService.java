@@ -72,6 +72,8 @@ public class MonitorService extends Service {
   private Handler handler;
   private SharedPreferences prefs;
   private final Set<String> notified = new HashSet<>();
+  /** 已自动签过的「主成员|attenceid」（见 loadAutoSigned 的说明） */
+  private final Set<String> autoSigned = new HashSet<>();
 
   @Override
   public void onCreate() {
@@ -82,6 +84,7 @@ public class MonitorService extends Service {
     thread.start();
     handler = new Handler(thread.getLooper());
     loadNotified();
+    loadAutoSigned();
   }
 
   @Override
@@ -305,23 +308,70 @@ public class MonitorService extends Service {
         return;
       }
 
+      // ---- GPS 自动签到 ----
+      // 用户提前在「GPS 签到 → 签到位置」里选好了地方，这里就用它替主成员签掉。
+      // 没有生效位置时**不签**（没坐标可报），但下面的列表照样显示出来，让人手动处理。
+      JSONObject acc = KtpApi.primaryAccount(prefs);
+      String who = acc == null ? "" : acc.optString("key", "");
+      double[] coords = LocationStore.activeCoords(prefs);
+      JSONObject activeLoc = LocationStore.active(prefs);
+      String placeName = activeLoc == null ? "" : activeLoc.optString("name", "");
+
       // 把列表交给界面（用来渲染「立即签到」按钮）
       JSONArray pend = new JSONArray();
       StringBuilder sb = new StringBuilder();
+      StringBuilder autoOk = new StringBuilder();
+      StringBuilder autoErr = new StringBuilder();
       for (String[] o : ongoing) {
         JSONObject item = new JSONObject();
         item.put("course", o[0]);
         item.put("id", o[1]);
         item.put("type", o[2]);
         item.put("title", o[3]);
+
+        boolean gps = "2".equals(o[2]);
+        boolean done = false;
+        String err = null;
+        if (gps && coords != null) {
+          String sk = who + "|" + o[1];
+          if (autoSigned.contains(sk)) {
+            done = true; // 前几轮已经替这个人签过了
+          } else {
+            JSONObject r = CheckinHelper.signLocation(this, o[1]);
+            if (r.optBoolean("ok")) {
+              autoSigned.add(sk);
+              saveAutoSigned();
+              done = true;
+            } else {
+              err = r.optString("message", "");
+            }
+          }
+        }
+        // signed=true 让界面把这一行直接画成「已签到 ✓」，不用再点
+        if (done) item.put("signed", true);
         pend.put(item);
 
-        notifyOngoing(o[0], o[1], o[2], o[3]);
+        if (gps && coords != null) {
+          if (done) {
+            if (autoOk.length() > 0) autoOk.append('、');
+            autoOk.append(o[0]);
+          } else if (err != null) {
+            if (autoErr.length() > 0) autoErr.append('、');
+            autoErr.append(o[0]).append('（').append(err).append('）');
+          }
+        }
+
+        notifyOngoing(o[0], o[1], o[2], o[3], done, placeName);
         if (sb.length() > 0) sb.append('；');
         sb.append(o[0]);
       }
       pendingJson = pend.toString();
-      lastStatus = "发现正在签到：" + sb;
+
+      StringBuilder status = new StringBuilder("发现正在签到：" + sb);
+      if (autoOk.length() > 0) status.append(" · 已自动签到：").append(autoOk);
+      if (autoErr.length() > 0) status.append(" · 自动签到失败：").append(autoErr);
+      if (coords == null) status.append(" · 还没选签到位置，没有自动签到");
+      lastStatus = status.toString();
       updateMonitorNotification(lastStatus);
     } catch (Exception e) {
       lastStatus = "检查出错：" + e.getMessage();
@@ -346,7 +396,8 @@ public class MonitorService extends Service {
 
   // ------------------------------------------------------------------ 通知
 
-  private void notifyOngoing(String course, String attenceId, String type, String title) {
+  private void notifyOngoing(
+      String course, String attenceId, String type, String title, boolean autoSigned, String place) {
     String dedupKey = course + "|" + attenceId;
     if (notified.contains(dedupKey)) return; // 同一次签到只提醒一次
     notified.add(dedupKey);
@@ -383,17 +434,33 @@ public class MonitorService extends Service {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
     b.setSmallIcon(android.R.drawable.ic_dialog_info)
-        .setContentTitle("您的「" + course + "」课程正在签到，请及时处理")
-        .setContentText(typeName + (title.isEmpty() ? "" : " · " + title))
-        .setStyle(new Notification.BigTextStyle().bigText(typeName + "（" + title + "）\n点开扫码签到"))
         .setPriority(Notification.PRIORITY_HIGH)
         .setDefaults(Notification.DEFAULT_ALL)
         .setAutoCancel(true)
         .setContentIntent(tap);
 
+    if (autoSigned) {
+      // 已经替他签好了：告诉他签在哪儿，不再给"立即签到"按钮
+      b.setContentTitle("已自动签到：「" + course + "」")
+          .setContentText(
+              typeName + (place.isEmpty() ? "" : " · 位置：" + place))
+          .setStyle(
+              new Notification.BigTextStyle()
+                  .bigText(
+                      typeName
+                          + (title.isEmpty() ? "" : "（" + title + "）")
+                          + "\n已用「"
+                          + (place.isEmpty() ? "签到位置" : place)
+                          + "」替你自动完成签到"));
+    } else {
+      b.setContentTitle("您的「" + course + "」课程正在签到，请及时处理")
+          .setContentText(typeName + (title.isEmpty() ? "" : " · " + title))
+          .setStyle(new Notification.BigTextStyle().bigText(typeName + "（" + title + "）\n点开扫码签到"));
+    }
+
     // 定位签到可以一键完成：坐标只是请求参数，不需要人真的在教室
     // （能不能过要看服务器验不验距离，见 CheckinHelper 的说明）
-    if ("2".equals(type)) {
+    if ("2".equals(type) && !autoSigned) {
       Intent sign = new Intent(this, MonitorService.class)
           .setAction(ACTION_SIGN)
           .putExtra(EXTRA_ATTENCE, attenceId);
@@ -481,6 +548,27 @@ public class MonitorService extends Service {
     List<String> list = new ArrayList<>(notified);
     if (list.size() > 100) list = list.subList(list.size() - 100, list.size());
     prefs.edit().putString("notifiedAttence", new JSONArray(list).toString()).apply();
+  }
+
+  /**
+   * 已经自动签过的「主成员|attenceid」。
+   *
+   * 为什么要单独记：一次签到会持续十几分钟，每轮检查都会命中同一条 ——
+   * 不记的话就会反复提交，服务端虽然会用「已参与过」挡回来，但那纯属浪费请求，
+   * 还会把日志刷满。
+   */
+  private void loadAutoSigned() {
+    try {
+      JSONArray arr = new JSONArray(prefs.getString("autoSignedAttence", "[]"));
+      for (int i = 0; i < arr.length(); i++) autoSigned.add(arr.getString(i));
+    } catch (Exception ignored) {
+    }
+  }
+
+  private void saveAutoSigned() {
+    List<String> list = new ArrayList<>(autoSigned);
+    if (list.size() > 100) list = list.subList(list.size() - 100, list.size());
+    prefs.edit().putString("autoSignedAttence", new JSONArray(list).toString()).apply();
   }
 
   static void start(Context ctx) {

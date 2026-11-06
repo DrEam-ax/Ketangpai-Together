@@ -206,6 +206,8 @@ function loadMonitor() {
     badge.textContent = "";
   }
 
+  renderAutoSignHint(r);
+
   renderPending(r.pending || [], lastCheckStatus);
   loadLocations();
 }
@@ -221,6 +223,26 @@ const KIND = { 1: "数字码签到", 2: "定位签到", 3: "扫码签到", 4: "�
  * 同一份数据画到两个地方：设置栏的「签到提醒」里画全部，
  * GPS 栏只画定位签到（那里才是处理它的地方）。
  */
+/**
+ * 「签到提醒」里检查频率下面那行小字：说明自动签到会用哪个地点。
+ *
+ * 没选位置时必须说清楚"不会自动签" —— 否则用户开了监控以为万无一失，
+ * 结果定位签到没被处理，就白等了。
+ */
+function renderAutoSignHint(r) {
+  const el = $("#auto-sign-hint");
+  if (!el) return;
+  const place = r.autoPlace || "";
+  if (!place) {
+    el.textContent =
+      "当前没有选签到位置 —— 定位签到不会自动签（去「GPS 签到 → 签到位置」选一个）";
+    el.style.color = "var(--warn)";
+    return;
+  }
+  el.textContent = `当前签到位置：${place}，如发现 GPS 签到，将使用该地点自动签到`;
+  el.style.color = "";
+}
+
 function renderPending(list, statusText) {
   const gps = list.filter((x) => x.type === "2");
   paintPending($("#pending"), list);
@@ -265,9 +287,12 @@ function signKey(attenceId) {
 
 function paintPending(box, list) {
   if (!box) return;
-  // 签名里必须带主成员：切了人就得重绘，否则上一个人的「已签到 ✓」会一直留着
-  // （用户报过：切主成员后再检测，明明有待签的课却点不动）
-  const sig = (state.primary || "") + "#" + list.map((x) => x.id).join(",");
+  // 签名里必须带两样东西：
+  //   1) 主成员 —— 切了人就得重绘，否则上一个人的「已签到 ✓」会一直留着
+  //   2) 每条的已签状态 —— 监控在后台自动签掉之后，id 没变但状态变了，
+  //      不放进签名就不会重绘，按钮还显示「立即签到」（用户会以为没签上）
+  const sig =
+    (state.primary || "") + "#" + list.map((x) => x.id + (x.signed ? "!" : "")).join(",");
   if (box.dataset.sig === sig) return; // 真的没变就不重绘，免得按钮点到一半被重建
   box.dataset.sig = sig;
   box.innerHTML = "";
@@ -276,7 +301,8 @@ function paintPending(box, list) {
     const el = document.createElement("div");
     el.className = "pend";
     const kind = KIND[it.type] || "签到";
-    const done = it.type === "2" && signedKeys.has(signKey(it.id));
+    // signed=true 是监控自动签掉之后原生告诉我们的；signedKeys 是用户手动点的
+    const done = it.signed === true || (it.type === "2" && signedKeys.has(signKey(it.id)));
     el.innerHTML =
       `<span class="who2">${esc(it.course)}<br /><span class="kind">${esc(kind)}${
         it.title ? " · " + esc(it.title) : ""
